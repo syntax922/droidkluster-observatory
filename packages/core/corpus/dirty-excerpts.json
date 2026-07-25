@@ -43,5 +43,30 @@
     "name": "clean review prose survives",
     "dirty": "Finding: the retry loop swallows the terminal error class instead of rethrowing it.",
     "mustNotContain": []
+  },
+  {
+    "name": "base64 bearer with slash",
+    "dirty": "Header was Bearer abc123DEF456/ghIJK789LMN012op unexpectedly",
+    "mustNotContain": ["abc123DEF456/ghIJK789LMN012op"]
+  },
+  {
+    "name": "spaced macos path",
+    "dirty": "Log at /Users/fake/Library/Application Support/appname/session.log line 3",
+    "mustNotContain": ["Application Support", "session.log"]
+  },
+  {
+    "name": "generic host with port",
+    "dirty": "Gateway gateway.prod.fake-vpc.example.io:9000 timed out",
+    "mustNotContain": ["gateway.prod.fake-vpc.example.io:9000"]
+  },
+  {
+    "name": "private tld .local",
+    "dirty": "Bonjour host printer.office.local answered",
+    "mustNotContain": ["printer.office.local"]
+  },
+  {
+    "name": "version-prefixed ip",
+    "dirty": "Upgraded to v10.99.88.77 successfully",
+    "mustNotContain": ["10.99.88.77"]
   }
 ]

@@ -31,4 +31,9 @@ describe("scrubExcerpt corpus", () => {
     expect(out.length).toBeLessThanOrEqual(EXCERPT_MAX_LEN);
     expect(out.endsWith("…")).toBe(true);
   });
+  it("bounds input with PRE_CAP to guard quadratic backtracking", () => {
+    const huge = "a.b ".repeat(20000);
+    const out = scrubExcerpt(huge);
+    expect(out.length).toBeLessThanOrEqual(EXCERPT_MAX_LEN);
+  });
 });
