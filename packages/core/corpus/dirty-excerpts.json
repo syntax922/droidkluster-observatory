@@ -1,0 +1,47 @@
+[
+  {
+    "name": "internal hostname",
+    "dirty": "Deploy failed reaching redis-bgp.droidkluster.internal on boot",
+    "mustNotContain": ["droidkluster.internal"]
+  },
+  {
+    "name": "raw ipv4",
+    "dirty": "Connection refused to 10.21.1.11:6379 during startup",
+    "mustNotContain": ["10.21.1.11"]
+  },
+  {
+    "name": "ipv6",
+    "dirty": "Bind failed on 2001:db8:beef::42 port 8443",
+    "mustNotContain": ["2001:db8:beef::42"]
+  },
+  {
+    "name": "absolute path",
+    "dirty": "Stack trace at /home/svc/repos/private-repo/src/auth/mint.ts line 40",
+    "mustNotContain": ["/home/svc/repos"]
+  },
+  {
+    "name": "github token shape",
+    "dirty": "Auth used token ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8 unexpectedly",
+    "mustNotContain": ["ghp_"]
+  },
+  {
+    "name": "generic bearer",
+    "dirty": "Header was Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.fake.fake",
+    "mustNotContain": ["eyJhbGciOiJIUzI1NiJ9"]
+  },
+  {
+    "name": "email",
+    "dirty": "Notify example.human@somewhere.example on failure",
+    "mustNotContain": ["example.human@somewhere.example"]
+  },
+  {
+    "name": "internal url",
+    "dirty": "Gateway at http://litellm.droidkluster.com:4000/v1 timed out",
+    "mustNotContain": ["litellm.droidkluster.com"]
+  },
+  {
+    "name": "clean review prose survives",
+    "dirty": "Finding: the retry loop swallows the terminal error class instead of rethrowing it.",
+    "mustNotContain": []
+  }
+]
