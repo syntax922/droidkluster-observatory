@@ -1,0 +1,8 @@
+{
+  "name": "@observatory/site",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": { "typecheck": "tsc --noEmit", "build": "vite build", "dev": "vite" },
+  "dependencies": { "@observatory/core": "*" },
+  "devDependencies": { "vite": "^6.0.0", "jsdom": "^25.0.0" }
+}
