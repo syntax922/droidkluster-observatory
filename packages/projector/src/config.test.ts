@@ -27,4 +27,11 @@ describe("readConfig", () => {
     const { NATS_SERVERS: _, ...rest } = base;
     expect(() => readConfig(rest)).toThrow(/NATS_SERVERS/);
   });
+  it("throws on a non-numeric PUSH_DEBOUNCE_MS", () => {
+    expect(() => readConfig({ ...base, PUSH_DEBOUNCE_MS: "abc" })).toThrow(/PUSH_DEBOUNCE_MS/);
+  });
+  it("filters empty entries from a trailing-comma NATS_SERVERS", () => {
+    const cfg = readConfig({ ...base, NATS_SERVERS: "nats://n1:4222," });
+    expect(cfg.natsServers).toEqual(["nats://n1:4222"]);
+  });
 });
