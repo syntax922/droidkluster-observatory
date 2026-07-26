@@ -43,3 +43,40 @@ body {
 [data-mode="stale"] {
   color: var(--warn);
 }
+.chain {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  margin: 8px 0;
+  padding: 8px;
+}
+.chain--active {
+  border-color: var(--active);
+}
+.chain-head {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.chain-track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hop {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+}
+.tick {
+  padding: 2px 0;
+  font-size: 0.8rem;
+}
+.tick-excerpt {
+  color: var(--dim);
+  padding-left: 2ch;
+  font-style: italic;
+}
+.chains-empty {
+  color: var(--dim);
+}
