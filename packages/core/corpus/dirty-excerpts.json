@@ -73,5 +73,10 @@
     "name": "single-label service host",
     "dirty": "Backend at internal-svc:8080 and cache at redis:6379 down",
     "mustNotContain": ["internal-svc:8080", "redis:6379"]
+  },
+  {
+    "name": "mixed ipv6 not fragmented by service-port rule",
+    "dirty": "trace shows db8::8a2e:370:7334 as the source",
+    "mustNotContain": ["8a2e", "7334"]
   }
 ]
