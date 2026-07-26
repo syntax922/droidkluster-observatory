@@ -3,7 +3,7 @@
 //   node dist/curate.js promote --chain pr-1607-2026-07-23 --title "CI red to merge in 41 minutes" --summary "..."
 import { parseArgs } from "node:util";
 import { ReplayBundleSchema, ReplayIndexSchema } from "@observatory/core";
-import { readConfig } from "./config.js";
+import { readR2Config } from "./config.js";
 import { EdgeWriter } from "./edge.js";
 
 export async function promote(
@@ -50,8 +50,8 @@ async function main(): Promise<void> {
     console.error("usage: curate.js promote --chain <id> --title <t> --summary <s>");
     process.exit(2);
   }
-  const cfg = readConfig(process.env);
-  const writer = new EdgeWriter(cfg.r2);
+  const r2 = readR2Config(process.env);
+  const writer = new EdgeWriter(r2);
   await promote(writer, {
     chain: values.chain,
     title: values.title,
