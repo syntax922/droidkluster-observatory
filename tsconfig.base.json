@@ -8,6 +8,8 @@
     "exactOptionalPropertyTypes": true,
     "declaration": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": { "@observatory/core": ["packages/core/src/index.ts"] }
   }
 }
