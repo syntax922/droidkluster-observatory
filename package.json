@@ -11,10 +11,12 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "build": "npm run build --workspaces --if-present",
-    "check": "npm run lint && npm run typecheck && npm run test"
+    "check": "npm run lint && npm run typecheck && npm run test",
+    "test:e2e": "npm run build --workspace @observatory/core --workspace @observatory/site && npx playwright test --config packages/site/playwright.config.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "@playwright/test": "^1.48.0",
     "@types/node": "^26.1.1",
     "typescript": "^5.5.4",
     "vitest": "^3.0.0"
