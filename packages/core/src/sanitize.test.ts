@@ -25,6 +25,12 @@ describe("scrubExcerpt corpus", () => {
       "Finding: the retry loop swallows the terminal error class instead of rethrowing it.";
     expect(scrubExcerpt(clean)).toBe(clean);
   });
+  it("html comment plumbing prefix is stripped entirely", () => {
+    const dirty =
+      "<!-- hs:command_id=0197dd23-d5f3-5a35-867d-477293c91595 --> Statement: the work is adequate.";
+    const out = scrubExcerpt(dirty);
+    expect(out).toMatch(/^Statement:/);
+  });
   it("truncates to EXCERPT_MAX_LEN with ellipsis", () => {
     const long = "a".repeat(1000);
     const out = scrubExcerpt(long);

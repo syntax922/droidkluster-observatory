@@ -37,6 +37,8 @@ const KILL_RULES: Array<{ name: string; re: RegExp }> = [
 
 export function scrubExcerpt(text: string): string {
   let out = text.slice(0, PRE_CAP);
+  // Internal plumbing prefixes (hs:command_id) — strip whole comments, not worth a redaction marker.
+  out = out.replace(/<!--[\s\S]*?-->/g, "");
   for (const rule of KILL_RULES) {
     out = out.replace(rule.re, (match) => {
       // abs-path keeps its leading delimiter so sentences stay readable.
