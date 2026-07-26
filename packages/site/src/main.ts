@@ -1,5 +1,6 @@
-import type { Chain, CurrentSnapshot, DroidId, PublicEvent } from "@observatory/core";
+import type { CurrentSnapshot, DroidId, PublicEvent } from "@observatory/core";
 import { DroidIdSchema } from "@observatory/core";
+import { createCelebrationTracker } from "./celebrate.js";
 import { fetchReplayBundle, fetchReplayIndex, startPolling } from "./data.js";
 import type { BoardView } from "./dmd/controller.js";
 import { startDmd } from "./dmd/controller.js";
@@ -33,28 +34,26 @@ let lastKnownContact = new Date(0).toISOString();
 // sync with whatever's on screen, even though it paints on its own clock.
 let lastBoard: BoardView = { mode: "idle", droids: [], celebrating: false };
 
-const CELEBRATE_WINDOW_MS = 10_000;
-
-// A chain hop of kind pr_merged within the last 10s of the snapshot's own
-// "now" (wall-clock for live, generated_at for replay) triggers the
-// celebration glyph across the board.
-function isCelebrating(chains: Chain[], nowMs: number): boolean {
-  for (const chain of chains) {
-    for (const hop of chain.hops) {
-      if (hop.kind !== "pr_merged") continue;
-      const age = nowMs - Date.parse(hop.at);
-      if (age >= 0 && age <= CELEBRATE_WINDOW_MS) return true;
-    }
-  }
-  return false;
-}
+// Edge-triggered celebration: the trigger is the OBSERVED merge event (a
+// pr_merged hop newer than any previously seen), not an age window on "now".
+// An age window either never lands (live polling can miss the merge while
+// it's still inside the window — pipeline latency is commonly 15-30s, well
+// past a 10s window) or stays sticky too long in replay (every frame within
+// the window re-derives celebrating=true independent of whether the merge
+// was already shown, and replay time-compression shrinks the window
+// unpredictably). Tracking real display-clock elapsed time instead means:
+// first time we observe a given merge, start a fixed 3s wall-clock countdown
+// — identical behavior live and in replay, because the trigger is "have we
+// rendered a merge this new before", and the duration is real elapsed time,
+// not a comparison against the snapshot's own clock. See celebrate.ts.
+const celebration = createCelebrationTracker();
 
 function renderLive(snap: CurrentSnapshot): void {
   const now = Date.now();
   renderStations(els.stations, snap.droids, now);
   renderChains(els.chains, snap.chains);
   renderHonesty(els.honesty, { mode: "live", lastContact: snap.last_contact, nowMs: now });
-  lastBoard = { mode: "live", droids: snap.droids, celebrating: isCelebrating(snap.chains, now) };
+  lastBoard = { mode: "live", droids: snap.droids, celebrating: celebration.observe(snap.chains) };
 }
 
 async function refreshTickerFromFeed(): Promise<void> {
@@ -88,7 +87,7 @@ const replay = createReplayController({
     lastBoard = {
       mode: "replay",
       droids: snap.droids,
-      celebrating: isCelebrating(snap.chains, replayNow),
+      celebrating: celebration.observe(snap.chains),
     };
   },
   onIdle: (lastContact) => {
