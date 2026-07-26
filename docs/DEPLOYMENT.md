@@ -77,7 +77,7 @@ rather than degrading silently.
 | `NATS_CA_FILE` | `/etc/observatory/ca.pem` | no | no | Path to a CA cert for TLS verification, if the NATS server needs one. Public cert material. |
 | `NATS_STREAM` | `dungeonadventures` | yes | no | JetStream stream name. |
 | `NATS_DURABLE` | `observatory-projector-v1` | yes | no | Durable consumer name. **See the filter-change gotcha below before bumping `NATS_FILTER_SUBJECTS` without also bumping this.** |
-| `NATS_FILTER_SUBJECTS` | `gh.event.dungeonadventures.>,dungeonadventures.event.merge_decision.reached.>` | yes | no | Comma-separated subject filters for the durable consumer. |
+| `NATS_FILTER_SUBJECTS` | `gh.event.dungeonadventures.>,dungeonadventures.event.merge_decision.reached.>,droidkluster.event.coder.completed.>` | yes | no | Comma-separated subject filters for the durable consumer. |
 | `R2_ACCOUNT_ID` | `a1b2c3d4e5f6...` | yes | no | Cloudflare account ID, from step 1.3 above. An identifier, not a secret by itself. |
 | `R2_BUCKET` | `observatory` | yes | no | Must match the bucket created in step 1.1. |
 | `R2_ACCESS_KEY_ID` | `f0e1d2c3b4a5...` | yes | **yes** | From the bucket-scoped API token, step 1.3. |
@@ -104,6 +104,11 @@ start against a durable consumer whose stored config no longer matches
 what you're asking for. This is easy to hit and easy to misdiagnose as a
 NATS auth or connectivity problem when it's actually a stale durable
 config.
+
+Verify at deploy time which JetStream stream carries `droidkluster.event.*`;
+if it differs from the gh-canon stream, the projector needs a second consumer
+(bump `NATS_DURABLE` naming accordingly) — see the durable filter-change
+gotcha above.
 
 ## 5. Kubernetes deployment
 
