@@ -63,4 +63,31 @@ describe("maybeCaptureChain", () => {
     await maybeCaptureChain(r.state, r.emitted, writer as never, () => {});
     expect(writer.putJson).not.toHaveBeenCalled();
   });
+
+  it("validation failure is logged, not thrown", async () => {
+    const { state, emitted } = mergedPrState();
+    // Corrupt the timestamp to trigger validation failure
+    const chain = state.chains.get(9);
+    if (chain && chain.events.length > 0) {
+      const firstEvent = chain.events[0];
+      if (firstEvent) {
+        firstEvent.at = "not-a-timestamp";
+      }
+    }
+    const writer = { putJson: vi.fn(), getJson: vi.fn() };
+    const logSpy = vi.fn();
+    await expect(
+      maybeCaptureChain(state, emitted, writer as never, logSpy),
+    ).resolves.toBeUndefined();
+    expect(writer.putJson).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(
+      "chain capture failed",
+      expect.objectContaining({
+        id: "pr-9-2026-07-25",
+        err: expect.any(String),
+      }),
+    );
+    // Events should NOT be cleared on validation failure
+    expect(chain?.events.length).toBeGreaterThan(0);
+  });
 });
