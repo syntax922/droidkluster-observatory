@@ -1,0 +1,48 @@
+import type { CurrentSnapshot, PublicEvent } from "@observatory/core";
+import type { EdgeWriter } from "./edge.js";
+
+export interface PushLoopOpts {
+  enabled: boolean;
+  writer: EdgeWriter;
+  getSnapshot: () => CurrentSnapshot;
+  getFeedDay: () => { key: string; events: PublicEvent[] };
+  debounceMs: number;
+  heartbeatMs: number;
+  log: (msg: string, extra?: object) => void;
+}
+
+export function startPushLoop(opts: PushLoopOpts): { markDirty: () => void; stop: () => void } {
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  let stopped = false;
+
+  async function pushAll(includeFeed: boolean): Promise<void> {
+    if (!opts.enabled || stopped) return;
+    try {
+      await opts.writer.putJson("current.json", opts.getSnapshot(), 15);
+      if (includeFeed) {
+        const day = opts.getFeedDay();
+        await opts.writer.putJson(day.key, { events: day.events }, 60);
+      }
+    } catch (err) {
+      opts.log("edge push failed", { err: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  const heartbeat = setInterval(() => void pushAll(false), opts.heartbeatMs);
+
+  return {
+    markDirty: () => {
+      if (!opts.enabled || stopped) return;
+      if (debounceTimer) return; // window already open; coalesce
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        void pushAll(true);
+      }, opts.debounceMs);
+    },
+    stop: () => {
+      stopped = true;
+      clearInterval(heartbeat);
+      if (debounceTimer) clearTimeout(debounceTimer);
+    },
+  };
+}
