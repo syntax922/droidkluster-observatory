@@ -16,7 +16,7 @@ NATS bus ──► observatory-projector ── push ──► KV/R2 data store 
                                      outbound  feed/<YYYY-MM-DD>.json
                                      only      replays/index.json
                                                replays/<run-id>.json
-                                               droids.json
+                                               chains/<id>.json
 ```
 
 The projector consumes cluster NATS events, reduces them to a small
