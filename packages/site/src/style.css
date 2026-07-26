@@ -1,0 +1,45 @@
+:root {
+  --bg: #0b0e13;
+  --panel: #12161f;
+  --line: #1f2632;
+  --text: #c8d2e0;
+  --dim: #6b7789;
+  --active: #59d0a0;
+  --warn: #e0b357;
+  font-family: "SF Mono", ui-monospace, monospace;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+.station {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 10px 12px;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.station--active {
+  border-color: var(--active);
+}
+.station-name {
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.station-role {
+  color: var(--dim);
+  font-size: 0.75rem;
+}
+.station-status {
+  font-size: 0.8rem;
+  margin-top: 4px;
+}
+[data-mode="stale"] {
+  color: var(--warn);
+}
