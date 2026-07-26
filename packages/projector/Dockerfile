@@ -14,7 +14,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/core/package.json packages/core/
 COPY packages/projector/package.json packages/projector/
-RUN npm ci --omit=dev --workspaces --include-workspace-root
+RUN npm ci --omit=dev --workspaces
 
 FROM node:22-slim
 WORKDIR /app
