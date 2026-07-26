@@ -49,7 +49,8 @@ function obj(v: unknown): Record<string, unknown> | undefined {
 interface Classified {
   kind: PublicEventKind;
   droid: DroidId | "system";
-  pr: number;
+  pr?: number;
+  issue?: number;
   summary: string;
   excerpt?: string;
   activate?: { droid: DroidId; task: string };
@@ -78,10 +79,52 @@ function classify(subject: string, payload: unknown): Classified | null {
     };
   }
 
+  // coder-completed family: droidkluster.event.coder.completed.<id>
+  if (subject.startsWith("droidkluster.event.coder.completed.")) {
+    const kindField = str(p.kind);
+    const pr = num(p.pr_number);
+    const issue = num(p.issue_number);
+    if (pr === undefined && issue === undefined) return null;
+    const rawStatus = (str(p.status) ?? "completed").toLowerCase();
+    const status = [
+      "opened",
+      "no_changes",
+      "reworked",
+      "no_review_kicked",
+      "no_open_threads",
+    ].includes(rawStatus)
+      ? rawStatus
+      : "completed";
+    const ref = pr !== undefined ? `PR #${pr}` : `issue #${issue}`;
+    const openedFromIssue = kindField === "issue" && pr !== undefined && issue !== undefined;
+    return {
+      kind: "coder_completed",
+      droid: "r5",
+      ...(pr !== undefined ? { pr } : {}),
+      ...(issue !== undefined ? { issue } : {}),
+      summary: openedFromIssue
+        ? `PR #${pr} opened from issue #${issue}`
+        : `coder ${status} · ${ref}`,
+      idle: { droid: "r5", last_action: `coder ${status} · ${ref}` },
+    };
+  }
+
   // canon gh family: gh.event.dungeonadventures.<entity>.<verb>.<idtail>
   if (!subject.startsWith("gh.event.dungeonadventures.") || tokens.length < 6) return null;
   const entity = tokens[3];
   const verb = tokens[4];
+
+  if (entity === "issue" && verb === "dispatched") {
+    const issue = num(p.issue_number) ?? num(Number(tokens[5]));
+    if (issue === undefined) return null;
+    return {
+      kind: "issue_dispatched",
+      droid: "r5",
+      issue,
+      summary: `issue #${issue} dispatched to coder`,
+      activate: { droid: "r5", task: `dispatching issue #${issue}` },
+    };
+  }
 
   if (entity === "pr") {
     const prObj = obj(p.pull_request);
@@ -201,7 +244,8 @@ export function reduce(
     at,
     droid: c.droid,
     kind: c.kind,
-    pr: c.pr,
+    ...(c.pr !== undefined ? { pr: c.pr } : {}),
+    ...(c.issue !== undefined ? { issue: c.issue } : {}),
     summary: c.summary,
     ...(c.excerpt ? { excerpt: c.excerpt } : {}),
   };
@@ -214,17 +258,19 @@ export function reduce(
     state.droids[c.idle.droid] = { last_action: c.idle.last_action };
   }
 
-  let chain = state.chains.get(c.pr);
-  if (!chain) {
-    chain = { pr: c.pr, hops: [], updated_at: at, active: true, complete: false, events: [] };
-    state.chains.set(c.pr, chain);
+  if (c.pr !== undefined) {
+    let chain = state.chains.get(c.pr);
+    if (!chain) {
+      chain = { pr: c.pr, hops: [], updated_at: at, active: true, complete: false, events: [] };
+      state.chains.set(c.pr, chain);
+    }
+    chain.hops.push({ at, droid: c.droid, kind: c.kind, label: c.summary });
+    if (chain.hops.length > CHAIN_HOPS_MAX) chain.hops.shift();
+    chain.events.push(event);
+    if (chain.events.length > CHAIN_EVENTS_MAX) chain.events.shift();
+    chain.updated_at = at;
+    if (c.complete) chain.complete = true;
   }
-  chain.hops.push({ at, droid: c.droid, kind: c.kind, label: c.summary });
-  if (chain.hops.length > CHAIN_HOPS_MAX) chain.hops.shift();
-  chain.events.push(event);
-  if (chain.events.length > CHAIN_EVENTS_MAX) chain.events.shift();
-  chain.updated_at = at;
-  if (c.complete) chain.complete = true;
 
   state.feed.push(event);
   if (state.feed.length > FEED_MAX) state.feed.shift();

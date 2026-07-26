@@ -220,3 +220,77 @@ describe("reduce", () => {
     expect(summary.toUpperCase()).not.toContain("SNEAKY");
   });
 });
+
+describe("R5 events", () => {
+  it("issue.dispatched activates r5, emits issue-only event, creates no chain", () => {
+    const { state, emitted } = reduce(emptyFleetState(), {
+      kind: "event",
+      id: "r5a",
+      subject: "gh.event.dungeonadventures.issue.dispatched.128",
+      ts: "2026-07-26T00:00:00Z",
+      payload: { issue_number: 128, command_id: "cmd-1", repository: { full_name: "x/d" } },
+    });
+    expect(state.droids.r5.task).toBe("dispatching issue #128");
+    expect(emitted[0]).toMatchObject({ kind: "issue_dispatched", droid: "r5", issue: 128 });
+    expect(emitted[0]?.pr).toBeUndefined();
+    expect(state.chains.size).toBe(0);
+  });
+  it("coder.completed (rework) idles r5 with allowlisted status and hops the PR chain", () => {
+    const s = reduce(emptyFleetState(), {
+      kind: "event",
+      id: "p",
+      subject: "gh.event.dungeonadventures.pr.opened.9",
+      ts: "2026-07-26T00:00:00Z",
+      payload: {
+        action: "opened",
+        pull_request: { number: 9, head: { sha: "x" } },
+        repository: { full_name: "x/d" },
+      },
+    }).state;
+    const { state, emitted } = reduce(s, {
+      kind: "event",
+      id: "r5b",
+      subject: "droidkluster.event.coder.completed.0198cafe",
+      ts: "2026-07-26T00:01:00Z",
+      payload: {
+        kind: "rework",
+        repo: "x/d",
+        pr_number: 9,
+        status: "reworked",
+        exit_code: 0,
+      },
+    });
+    expect(state.droids.r5.task).toBeUndefined();
+    expect(state.droids.r5.last_action).toBe("coder reworked · PR #9");
+    expect(emitted[0]).toMatchObject({ kind: "coder_completed", pr: 9 });
+    expect(state.chains.get(9)?.hops.at(-1)?.label).toContain("coder reworked");
+  });
+  it("coder.completed (issue kind) that opened a PR hops the new chain with the issue link", () => {
+    const { state, emitted } = reduce(emptyFleetState(), {
+      kind: "event",
+      id: "r5c",
+      subject: "droidkluster.event.coder.completed.0198beef",
+      ts: "2026-07-26T00:02:00Z",
+      payload: {
+        kind: "issue",
+        repo: "x/d",
+        issue_number: 128,
+        status: "opened",
+        exit_code: 0,
+        pr_number: 130,
+      },
+    });
+    expect(emitted[0]).toMatchObject({ pr: 130, issue: 128 });
+    expect(state.chains.get(130)?.hops[0]?.label).toBe("PR #130 opened from issue #128");
+  });
+  it("unexpected coder status falls back to completed", () => {
+    const { emitted } = reduce(emptyFleetState(), {
+      kind: "event",
+      id: "r5d",
+      subject: "droidkluster.event.coder.completed.0198dead",
+      ts: "2026-07-26T00:03:00Z",
+      payload: { kind: "rework", pr_number: 9, status: "sneaky<script>" },
+    });
+    expect(emitted[0]?.summary).toContain("coder completed");
+  });
+});
