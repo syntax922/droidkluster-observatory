@@ -25,6 +25,7 @@ export interface FleetState {
 
 const FEED_MAX = 100;
 const CHAIN_EVENTS_MAX = 200;
+const CHAIN_HOPS_MAX = 200;
 
 export function emptyFleetState(): FleetState {
   return {
@@ -63,7 +64,10 @@ function classify(subject: string, payload: unknown): Classified | null {
   // merge-decider family: project.event.merge_decision.reached.<pr>
   if (subject.startsWith("project.event.merge_decision.reached.")) {
     const pr = num(p.pr_number) ?? num(Number(tokens[tokens.length - 1]));
-    const verdict = str(p.verdict) ?? "DECIDED";
+    const rawVerdict = (str(p.verdict) ?? "DECIDED").toUpperCase();
+    const verdict = ["APPROVED", "REJECTED", "DEFERRED", "DECIDED"].includes(rawVerdict)
+      ? rawVerdict
+      : "DECIDED";
     if (!pr) return null;
     return {
       kind: "merge_decision",
@@ -120,7 +124,10 @@ function classify(subject: string, payload: unknown): Classified | null {
     const pr = num(obj(p.pull_request)?.number);
     if (!pr) return null;
     const review = obj(p.review);
-    const verdict = (str(review?.state) ?? "commented").toUpperCase();
+    const raw = (str(review?.state) ?? "commented").toUpperCase();
+    const verdict = ["APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"].includes(raw)
+      ? raw
+      : "COMMENTED";
     const body = str(review?.body);
     return {
       kind: "review_posted",
@@ -135,7 +142,7 @@ function classify(subject: string, payload: unknown): Classified | null {
   if (entity === "check_run" && verb === "completed") {
     const cr = obj(p.check_run);
     const pr = num(obj((cr?.pull_requests as unknown[] | undefined)?.[0])?.number);
-    const name = str(cr?.name) ?? "check";
+    const name = scrubExcerpt(str(cr?.name) ?? "check").slice(0, 40);
     const conclusion = str(cr?.conclusion) ?? "unknown";
     if (!pr) return null;
     if (conclusion === "failure") {
@@ -213,7 +220,7 @@ export function reduce(
     state.chains.set(c.pr, chain);
   }
   chain.hops.push({ at, droid: c.droid, kind: c.kind, label: c.summary });
-  if (chain.hops.length > 200) chain.hops.shift();
+  if (chain.hops.length > CHAIN_HOPS_MAX) chain.hops.shift();
   chain.events.push(event);
   if (chain.events.length > CHAIN_EVENTS_MAX) chain.events.shift();
   chain.updated_at = at;
