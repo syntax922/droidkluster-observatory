@@ -2,7 +2,7 @@
 
 A public, live view of the droidkluster autonomous agent fleet — what
 each agent (HK-47 reviews PRs, 2-1B diagnoses CI, TT-8L gates merges,
-EV-9D9 operates the cluster) is doing right now and has done recently.
+EV-9D9 operates the cluster, R5 dispatches and reroutes) is doing right now and has done recently.
 The private cluster projects that state out through a sanitizing,
 push-only diode: outbound only, no listener, nothing inbound ever
 reaches it.
@@ -48,6 +48,16 @@ source stay private. This repo is public code, private deployment.
 - **`packages/core`** — allowlisted schemas, the excerpt sanitizer + kill-rule corpus, the fleet event reducer, and the snapshot builder; no I/O.
 - **`packages/projector`** — the in-cluster NATS consumer that reduces and sanitizes canon events and pushes the result to Cloudflare R2; ships as a container image.
 - **`packages/site`** — the static Mission Control board: polls the edge store, renders droid stations and correlation-chain pipelines, falls back honestly to a labeled replay when idle.
+
+Each station displays a **per-station dot-matrix state display (DMD)**: pure deterministic
+frame functions (64×32, unit-tested per frame) that render active/idle/stale/celebrate
+states using reduced-motion-aware glyphs and per-droid accent colors.
+
+Each droid carries an **abstracted specification — the contract the agent runs under**,
+not its prompt. The specification details what events the agent observes, what invariants
+it upholds, what outputs it emits, what actions are forbidden, and what situations it must
+escalate. Verbatim prompts are withheld: drift liability and exposure to adversarial-input
+reconnaissance.
 
 ## Local development
 
