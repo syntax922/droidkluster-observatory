@@ -1,0 +1,87 @@
+[
+  {
+    "name": "internal hostname",
+    "dirty": "Deploy failed reaching svc-cache.droidkluster.internal on boot",
+    "mustNotContain": ["droidkluster.internal"]
+  },
+  {
+    "name": "raw ipv4",
+    "dirty": "Connection refused to 192.0.2.11:6379 during startup",
+    "mustNotContain": ["192.0.2.11"]
+  },
+  {
+    "name": "ipv6",
+    "dirty": "Bind failed on 2001:db8:beef::42 port 8443",
+    "mustNotContain": ["2001:db8:beef::42"]
+  },
+  {
+    "name": "absolute path",
+    "dirty": "Stack trace at /home/svc/repos/private-repo/src/auth/mint.ts line 40",
+    "mustNotContain": ["/home/svc/repos"]
+  },
+  {
+    "name": "github token shape",
+    "dirty": "Auth used token ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8 unexpectedly",
+    "mustNotContain": ["ghp_"]
+  },
+  {
+    "name": "generic bearer",
+    "dirty": "Header was Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.fake.fake",
+    "mustNotContain": ["eyJhbGciOiJIUzI1NiJ9"]
+  },
+  {
+    "name": "email",
+    "dirty": "Notify example.human@somewhere.example on failure",
+    "mustNotContain": ["example.human@somewhere.example"]
+  },
+  {
+    "name": "internal url",
+    "dirty": "Gateway at http://llm-gw.droidkluster.com:4000/v1 timed out",
+    "mustNotContain": ["llm-gw.droidkluster.com"]
+  },
+  {
+    "name": "clean review prose survives",
+    "dirty": "Finding: the retry loop swallows the terminal error class instead of rethrowing it.",
+    "mustNotContain": []
+  },
+  {
+    "name": "base64 bearer with slash",
+    "dirty": "Header was Bearer abc123DEF456/ghIJK789LMN012op unexpectedly",
+    "mustNotContain": ["abc123DEF456/ghIJK789LMN012op"]
+  },
+  {
+    "name": "spaced macos path",
+    "dirty": "Log at /Users/fake/Library/Application Support/appname/session.log line 3",
+    "mustNotContain": ["Application Support", "session.log"]
+  },
+  {
+    "name": "generic host with port",
+    "dirty": "Gateway gateway.prod.fake-vpc.example.io:9000 timed out",
+    "mustNotContain": ["gateway.prod.fake-vpc.example.io:9000"]
+  },
+  {
+    "name": "private tld .local",
+    "dirty": "Bonjour host printer.office.local answered",
+    "mustNotContain": ["printer.office.local"]
+  },
+  {
+    "name": "version-prefixed ip",
+    "dirty": "Upgraded to v10.99.88.77 successfully",
+    "mustNotContain": ["10.99.88.77"]
+  },
+  {
+    "name": "single-label service host",
+    "dirty": "Backend at internal-svc:8080 and cache at redis:6379 down",
+    "mustNotContain": ["internal-svc:8080", "redis:6379"]
+  },
+  {
+    "name": "mixed ipv6 not fragmented by service-port rule",
+    "dirty": "trace shows db8::8a2e:370:7334 as the source",
+    "mustNotContain": ["8a2e", "7334"]
+  },
+  {
+    "name": "html comment plumbing prefix",
+    "dirty": "<!-- hs:command_id=0197dd23-d5f3-5a35-867d-477293c91595 --> Statement: the work is adequate.",
+    "mustNotContain": ["hs:command_id", "<!--", "-->"]
+  }
+]
