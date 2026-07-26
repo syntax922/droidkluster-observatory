@@ -32,6 +32,21 @@ function numEnv(env: Record<string, string | undefined>, name: string, fallback:
   return n;
 }
 
+/**
+ * Extracts only the four R2_* vars. Split out from readConfig() so
+ * standalone CLIs (curate.js) that only ever touch the R2 bucket don't have
+ * to satisfy the full projector env contract (NATS_*) just to read/write
+ * chains and replays.
+ */
+export function readR2Config(env: Record<string, string | undefined>): ProjectorConfig["r2"] {
+  return {
+    accountId: req(env, "R2_ACCOUNT_ID"),
+    bucket: req(env, "R2_BUCKET"),
+    accessKeyId: req(env, "R2_ACCESS_KEY_ID"),
+    secretAccessKey: req(env, "R2_SECRET_ACCESS_KEY"),
+  };
+}
+
 export function readConfig(env: Record<string, string | undefined>): ProjectorConfig {
   return {
     natsServers: csv(env, "NATS_SERVERS"),
@@ -40,12 +55,7 @@ export function readConfig(env: Record<string, string | undefined>): ProjectorCo
     natsStream: req(env, "NATS_STREAM"),
     natsDurable: req(env, "NATS_DURABLE"),
     filterSubjects: csv(env, "NATS_FILTER_SUBJECTS"),
-    r2: {
-      accountId: req(env, "R2_ACCOUNT_ID"),
-      bucket: req(env, "R2_BUCKET"),
-      accessKeyId: req(env, "R2_ACCESS_KEY_ID"),
-      secretAccessKey: req(env, "R2_SECRET_ACCESS_KEY"),
-    },
+    r2: readR2Config(env),
     pushEnabled: env.OBSERVATORY_PUSH_ENABLED !== "false",
     debounceMs: numEnv(env, "PUSH_DEBOUNCE_MS", 10000),
     heartbeatMs: numEnv(env, "PUSH_HEARTBEAT_MS", 60000),
