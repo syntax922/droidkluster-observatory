@@ -1,5 +1,5 @@
 export interface HonestyOpts {
-  mode: "live" | "stale" | "replay";
+  mode: "live" | "stale" | "replay" | "idle";
   lastContact: string;
   nowMs: number;
   replayLabel?: string;
@@ -19,6 +19,9 @@ export function renderHonesty(el: HTMLElement, opts: HonestyOpts): void {
   } else if (opts.mode === "stale") {
     el.textContent = `telemetry paused — last contact ${a}`;
     el.dataset.mode = "stale";
+  } else if (opts.mode === "idle") {
+    el.textContent = `fleet idle — no replay available · last contact ${a}`;
+    el.dataset.mode = "idle";
   } else {
     el.textContent = `${opts.replayLabel ?? "REPLAY"} · live telemetry last contact ${a}`;
     el.dataset.mode = "replay";

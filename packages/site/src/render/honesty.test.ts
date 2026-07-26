@@ -26,4 +26,11 @@ describe("renderHonesty", () => {
     });
     expect(el.textContent).toContain("REPLAY — PR #1607");
   });
+  it("idle mode names the honest no-replay-available state", () => {
+    const el = document.createElement("div");
+    renderHonesty(el, { mode: "idle", lastContact: "2026-07-25T13:19:41Z", nowMs: NOW });
+    expect(el.textContent).toContain("fleet idle — no replay available");
+    expect(el.textContent).toContain("41m");
+    expect(el.dataset.mode).toBe("idle");
+  });
 });
