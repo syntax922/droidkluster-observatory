@@ -41,6 +41,7 @@ export function renderStations(el: HTMLElement, droids: DroidStatus[], nowMs: nu
     dmd.dataset.dmd = d.droid;
     dmd.width = 192;
     dmd.height = 96;
+    dmd.setAttribute("aria-hidden", "true");
     card.appendChild(dmd);
 
     el.appendChild(card);

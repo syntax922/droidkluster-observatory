@@ -39,7 +39,7 @@ function celebrateFrame(tMs: number): Frame {
   const cy = DMD_H / 2;
   // Two expanding diamond rings, wrapping every 1.6s.
   for (const phase of [0, 800]) {
-    const r = Math.floor((((tMs + phase) % 1600) / 1600) * 22);
+    const r = Math.floor((((tMs + phase) % 1600) / 1600) * 15);
     for (let i = 0; i <= r; i++) {
       px(f, cx + i, cy - (r - i), 3);
       px(f, cx + i, cy + (r - i), 3);
@@ -120,7 +120,7 @@ activeGlyphs.r5 = (t) => {
 activeGlyphs.copilot = (t) => {
   const f = blank();
   const total = 24;
-  const built = Math.floor(t / 180) % (total + 6); // brief hold at full
+  const built = 1 + (Math.floor(t / 180) % (total + 5)); // never fully blank; brief hold at full
   for (let i = 0; i < Math.min(built, total); i++) {
     const col = i % 6;
     const row = Math.floor(i / 6);
