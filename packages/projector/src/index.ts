@@ -48,8 +48,11 @@ export async function main(): Promise<void> {
   log("connected", { servers: cfg.natsServers });
 
   const jsm = await nc.jetstreamManager();
-  // Read-only observer: ephemeral-per-boot is acceptable (missing events only
-  // degrade the showcase). deliver_policy: new — never replays the backlog.
+  // Durable consumer with deliver_policy: new — first boot starts from "now" (no backlog
+  // replay); restarts resume from the durable's position.
+  // NOTE: jsm.consumers.add() with a changed config (e.g. new NATS_FILTER_SUBJECTS) on the
+  // same durable name is rejected by the server — bump NATS_DURABLE or delete the old
+  // consumer when changing filters.
   await jsm.consumers.add(cfg.natsStream, {
     durable_name: cfg.natsDurable,
     ack_policy: AckPolicy.Explicit,
@@ -96,7 +99,7 @@ export async function main(): Promise<void> {
   }
 }
 
-if (process.argv[1]) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   void main().catch((err) => {
     console.error("observatory-projector failed to start", err);
     process.exit(1);

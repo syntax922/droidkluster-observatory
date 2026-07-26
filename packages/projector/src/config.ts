@@ -17,18 +17,29 @@ function req(env: Record<string, string | undefined>, name: string): string {
   return v;
 }
 
+function csv(env: Record<string, string | undefined>, name: string): string[] {
+  return req(env, name)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function numEnv(env: Record<string, string | undefined>, name: string, fallback: number): number {
+  const raw = env[name];
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (Number.isNaN(n) || n < 0) throw new Error(`invalid numeric value for ${name}`);
+  return n;
+}
+
 export function readConfig(env: Record<string, string | undefined>): ProjectorConfig {
   return {
-    natsServers: req(env, "NATS_SERVERS")
-      .split(",")
-      .map((s) => s.trim()),
+    natsServers: csv(env, "NATS_SERVERS"),
     ...(env.NATS_NKEY_SEED_FILE ? { natsNkeySeedFile: env.NATS_NKEY_SEED_FILE } : {}),
     ...(env.NATS_CA_FILE ? { natsCaFile: env.NATS_CA_FILE } : {}),
     natsStream: req(env, "NATS_STREAM"),
     natsDurable: req(env, "NATS_DURABLE"),
-    filterSubjects: req(env, "NATS_FILTER_SUBJECTS")
-      .split(",")
-      .map((s) => s.trim()),
+    filterSubjects: csv(env, "NATS_FILTER_SUBJECTS"),
     r2: {
       accountId: req(env, "R2_ACCOUNT_ID"),
       bucket: req(env, "R2_BUCKET"),
@@ -36,7 +47,7 @@ export function readConfig(env: Record<string, string | undefined>): ProjectorCo
       secretAccessKey: req(env, "R2_SECRET_ACCESS_KEY"),
     },
     pushEnabled: env.OBSERVATORY_PUSH_ENABLED !== "false",
-    debounceMs: Number(env.PUSH_DEBOUNCE_MS ?? "10000"),
-    heartbeatMs: Number(env.PUSH_HEARTBEAT_MS ?? "60000"),
+    debounceMs: numEnv(env, "PUSH_DEBOUNCE_MS", 10000),
+    heartbeatMs: numEnv(env, "PUSH_HEARTBEAT_MS", 60000),
   };
 }
