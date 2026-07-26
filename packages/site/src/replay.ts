@@ -158,7 +158,6 @@ function syntheticPayload(e: PublicEvent): Record<string, unknown> {
       return {
         issue_number: e.issue,
         command_id: `replay-${e.id}`,
-        repository: { full_name: "replay/replay" },
       };
     case "coder_completed": {
       const status = /coder (\w+)/.exec(e.summary)?.[1] ?? "completed";
