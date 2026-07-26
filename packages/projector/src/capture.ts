@@ -10,6 +10,7 @@ export async function maybeCaptureChain(
 ): Promise<void> {
   for (const e of emitted) {
     if (e.kind !== "pr_merged" && e.kind !== "pr_closed") continue;
+    if (e.pr === undefined) continue;
     const chain = state.chains.get(e.pr);
     if (!chain || chain.events.length === 0) continue;
     try {

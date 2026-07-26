@@ -104,18 +104,23 @@ function syntheticSubject(e: PublicEvent): string {
     case "pr_merged":
     case "pr_closed":
       return `gh.event.project.pr.closed.${e.pr}`;
+    case "issue_dispatched":
+      return `gh.event.project.issue.dispatched.${e.issue ?? 0}`;
+    case "coder_completed":
+      return `droidkluster.event.coder.completed.replay-${e.id}`;
   }
 }
 
 function syntheticPayload(e: PublicEvent): Record<string, unknown> {
   const verdictMatch = /review (\w+)/.exec(e.summary);
+  const pr = e.pr ?? 0;
   switch (e.kind) {
     case "pr_opened":
-      return { action: "opened", pull_request: { number: e.pr } };
+      return { action: "opened", pull_request: { number: pr } };
     case "review_requested":
-      return { action: "review_requested", pull_request: { number: e.pr } };
+      return { action: "review_requested", pull_request: { number: pr } };
     case "review_started":
-      return { action: "review_started", pull_request: { number: e.pr } };
+      return { action: "review_started", pull_request: { number: pr } };
     case "review_posted":
       return {
         action: "submitted",
@@ -123,7 +128,7 @@ function syntheticPayload(e: PublicEvent): Record<string, unknown> {
           state: verdictMatch?.[1]?.toLowerCase() ?? "commented",
           ...(e.excerpt ? { body: e.excerpt } : {}),
         },
-        pull_request: { number: e.pr },
+        pull_request: { number: pr },
       };
     case "check_run": {
       const conclusion = e.summary.startsWith("CI red")
@@ -135,19 +140,28 @@ function syntheticPayload(e: PublicEvent): Record<string, unknown> {
         check_run: {
           name,
           conclusion,
-          pull_requests: [{ number: e.pr }],
+          pull_requests: [{ number: pr }],
         },
       };
     }
     case "copilot_session_started":
-      return { action: "started", pull_request: { number: e.pr } };
+      return { action: "started", pull_request: { number: pr } };
     case "copilot_session_ended":
-      return { action: "ended", pull_request: { number: e.pr } };
+      return { action: "ended", pull_request: { number: pr } };
     case "merge_decision":
-      return { pr_number: e.pr, verdict: /decision: (\w+)/.exec(e.summary)?.[1] ?? "DECIDED" };
+      return { pr_number: pr, verdict: /decision: (\w+)/.exec(e.summary)?.[1] ?? "DECIDED" };
     case "pr_merged":
-      return { action: "closed", pull_request: { number: e.pr, merged: true } };
+      return { action: "closed", pull_request: { number: pr, merged: true } };
     case "pr_closed":
-      return { action: "closed", pull_request: { number: e.pr, merged: false } };
+      return { action: "closed", pull_request: { number: pr, merged: false } };
+    case "issue_dispatched":
+      return { issue_number: e.issue, command_id: `replay-${e.id}` };
+    case "coder_completed":
+      return {
+        kind: e.pr !== undefined ? "rework" : "issue",
+        pr_number: e.pr,
+        issue_number: e.issue,
+        status: "no_changes",
+      };
   }
 }

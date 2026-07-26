@@ -29,7 +29,7 @@ const CHAIN_HOPS_MAX = 200;
 
 export function emptyFleetState(): FleetState {
   return {
-    droids: { "hk-47": {}, "2-1b": {}, "tt-8l": {}, "ev-9d9": {}, copilot: {} },
+    droids: { "hk-47": {}, "2-1b": {}, "tt-8l": {}, "ev-9d9": {}, r5: {}, copilot: {} },
     chains: new Map(),
     feed: [],
   };

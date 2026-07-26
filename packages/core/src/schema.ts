@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const DroidIdSchema = z.enum(["hk-47", "2-1b", "tt-8l", "ev-9d9", "copilot"]);
+export const DroidIdSchema = z.enum(["hk-47", "2-1b", "tt-8l", "ev-9d9", "r5", "copilot"]);
 export type DroidId = z.infer<typeof DroidIdSchema>;
 
 export const PublicEventKindSchema = z.enum([
@@ -14,6 +14,8 @@ export const PublicEventKindSchema = z.enum([
   "merge_decision",
   "pr_merged",
   "pr_closed",
+  "issue_dispatched",
+  "coder_completed",
 ]);
 export type PublicEventKind = z.infer<typeof PublicEventKindSchema>;
 
@@ -24,12 +26,21 @@ export const PublicEventSchema = z
     at: z.string().datetime({ offset: true }).or(z.string().datetime()),
     droid: DroidIdSchema.or(z.literal("system")),
     kind: PublicEventKindSchema,
-    pr: z.number().int().positive(),
+    pr: z.number().int().positive().optional(),
+    issue: z.number().int().positive().optional(),
     summary: z.string().min(1).max(200),
     excerpt: z.string().max(600).optional(),
     duration_s: z.number().nonnegative().optional(),
   })
-  .strict();
+  .strict()
+  .superRefine((v, ctx) => {
+    if (v.pr === undefined && v.issue === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "event requires pr or issue",
+      });
+    }
+  });
 export type PublicEvent = z.infer<typeof PublicEventSchema>;
 
 export const DroidStatusSchema = z
