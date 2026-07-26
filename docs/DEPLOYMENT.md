@@ -75,7 +75,7 @@ rather than degrading silently.
 | `NATS_SERVERS` | `nats://<nats-host>.internal:4222` | yes | no | Comma-separated list. Internal-only hostname, not a credential — but see the [threat model's residual-risk note](../THREAT_MODEL.md#residual-risks) on subject-naming exposure; the server address itself isn't reachable from outside the cluster. |
 | `NATS_NKEY_SEED_FILE` | `/etc/observatory/nats.nk` | no | **yes** | Path to an NKey seed file. The path itself isn't sensitive; the file it points to is the actual credential and must be mounted from the cluster secret store, never committed. |
 | `NATS_CA_FILE` | `/etc/observatory/ca.pem` | no | no | Path to a CA cert for TLS verification, if the NATS server needs one. Public cert material. |
-| `NATS_STREAM` | `dungeonadventures` | yes | no | JetStream stream name. |
+| `NATS_STREAM` | `EVENTS` | yes | no | JetStream stream name. |
 | `NATS_DURABLE` | `observatory-projector-v1` | yes | no | Durable consumer name. **See the filter-change gotcha below before bumping `NATS_FILTER_SUBJECTS` without also bumping this.** |
 | `NATS_FILTER_SUBJECTS` | `gh.event.dungeonadventures.>,dungeonadventures.event.merge_decision.reached.>,droidkluster.event.coder.completed.>` | yes | no | Comma-separated subject filters for the durable consumer. |
 | `R2_ACCOUNT_ID` | `a1b2c3d4e5f6...` | yes | no | Cloudflare account ID, from step 1.3 above. An identifier, not a secret by itself. |
@@ -105,10 +105,13 @@ what you're asking for. This is easy to hit and easy to misdiagnose as a
 NATS auth or connectivity problem when it's actually a stale durable
 config.
 
-Verify at deploy time which JetStream stream carries `droidkluster.event.*`;
-if it differs from the gh-canon stream, the projector needs a second consumer
-(bump `NATS_DURABLE` naming accordingly) — see the durable filter-change
-gotcha above.
+Verified: the canon `EVENTS` stream's subjects cover all three observatory
+subject families — `gh.event.>`, `dungeonadventures.event.>`, and
+`droidkluster.event.>` — so a single durable consumer with the three
+`NATS_FILTER_SUBJECTS` filters above is sufficient. No second consumer or
+second stream is needed. See the durable filter-change gotcha above if you
+ever add, remove, or narrow one of those three filter subjects — that still
+requires bumping `NATS_DURABLE`.
 
 ## 5. Kubernetes deployment
 
