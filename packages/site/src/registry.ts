@@ -42,6 +42,12 @@ export const DROID_REGISTRY: Record<DroidId, DroidInfo> = {
     model: "Claude Sonnet",
     doctrine: ["Translates operator intent into bounded, audited cluster actions."],
   },
+  r5: {
+    name: "R5",
+    role: "Coder dispatcher",
+    model: "Claude Sonnet",
+    doctrine: ["Dispatches issues to coders; orchestrates rework cycles and completions."],
+  },
   copilot: {
     name: "Copilot",
     role: "Implementing agent (guest)",

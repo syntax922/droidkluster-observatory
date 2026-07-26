@@ -47,3 +47,36 @@ describe("ReplayBundleSchema", () => {
     expect(ReplayBundleSchema.safeParse(bundle).success).toBe(false);
   });
 });
+
+describe("PublicEventSchema phase 2", () => {
+  const base = {
+    id: "e1",
+    at: "2026-07-26T00:00:00Z",
+    droid: "r5",
+    summary: "issue #12 dispatched to coder",
+  };
+  it("accepts r5 and issue-only events", () => {
+    expect(PublicEventSchema.parse({ ...base, kind: "issue_dispatched", issue: 12 }).issue).toBe(
+      12,
+    );
+  });
+  it("accepts coder_completed with pr only", () => {
+    expect(
+      PublicEventSchema.parse({
+        ...base,
+        kind: "coder_completed",
+        pr: 9,
+        summary: "coder reworked · PR #9",
+      }).pr,
+    ).toBe(9);
+  });
+  it("rejects events with neither pr nor issue", () => {
+    expect(PublicEventSchema.safeParse({ ...base, kind: "issue_dispatched" }).success).toBe(false);
+  });
+  it("still rejects unknown droids", () => {
+    expect(
+      PublicEventSchema.safeParse({ ...base, droid: "bb-8", kind: "issue_dispatched", issue: 1 })
+        .success,
+    ).toBe(false);
+  });
+});
