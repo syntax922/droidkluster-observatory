@@ -17,14 +17,22 @@ async function fetchParsed<T>(url: string, parse: (v: unknown) => T): Promise<T 
   }
 }
 
+function normalizeBase(base: string): string {
+  return base.replace(/\/$/, "");
+}
+
 export function fetchSnapshot(base: string): Promise<CurrentSnapshot | null> {
-  return fetchParsed(`${base}/current.json`, (v) => CurrentSnapshotSchema.parse(v));
+  return fetchParsed(`${normalizeBase(base)}/current.json`, (v) => CurrentSnapshotSchema.parse(v));
 }
 export function fetchReplayIndex(base: string): Promise<ReplayIndex | null> {
-  return fetchParsed(`${base}/replays/index.json`, (v) => ReplayIndexSchema.parse(v));
+  return fetchParsed(`${normalizeBase(base)}/replays/index.json`, (v) =>
+    ReplayIndexSchema.parse(v),
+  );
 }
 export function fetchReplayBundle(base: string, id: string): Promise<ReplayBundle | null> {
-  return fetchParsed(`${base}/replays/${id}.json`, (v) => ReplayBundleSchema.parse(v));
+  return fetchParsed(`${normalizeBase(base)}/replays/${id}.json`, (v) =>
+    ReplayBundleSchema.parse(v),
+  );
 }
 
 export interface PollingOpts {
@@ -41,6 +49,7 @@ export function startPolling(opts: PollingOpts): () => void {
   async function poll(): Promise<void> {
     if (stopped) return;
     const snap = await fetchSnapshot(opts.base);
+    if (stopped) return;
     if (snap) {
       lastGood = snap;
       opts.onSnapshot(snap);
