@@ -78,5 +78,10 @@
     "name": "mixed ipv6 not fragmented by service-port rule",
     "dirty": "trace shows db8::8a2e:370:7334 as the source",
     "mustNotContain": ["8a2e", "7334"]
+  },
+  {
+    "name": "html comment plumbing prefix",
+    "dirty": "<!-- hs:command_id=0197dd23-d5f3-5a35-867d-477293c91595 --> Statement: the work is adequate.",
+    "mustNotContain": ["hs:command_id", "<!--", "-->"]
   }
 ]
