@@ -2,7 +2,7 @@
 // sanitized public replay bundles. Sanitization is inherited: every event is
 // produced by the same reducer the live projector uses, so excerpts pass
 // through scrubExcerpt and only PublicEvent fields survive.
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { type CanonEnvelope, ReplayBundleSchema, emptyFleetState, reduce } from "@observatory/core";
@@ -29,6 +29,7 @@ export function ingest(inputPath: string, outDir: string): string[] {
     }
   }
 
+  mkdirSync(outDir, { recursive: true });
   const written: string[] = [];
   for (const chain of state.chains.values()) {
     if (chain.events.length < MIN_EVENTS) continue;
