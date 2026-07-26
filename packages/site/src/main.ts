@@ -1,6 +1,8 @@
-import type { CurrentSnapshot, DroidId, PublicEvent } from "@observatory/core";
+import type { Chain, CurrentSnapshot, DroidId, PublicEvent } from "@observatory/core";
 import { DroidIdSchema } from "@observatory/core";
 import { fetchReplayBundle, fetchReplayIndex, startPolling } from "./data.js";
+import type { BoardView } from "./dmd/controller.js";
+import { startDmd } from "./dmd/controller.js";
 import { renderChains } from "./render/chains.js";
 import { renderDossier } from "./render/dossier.js";
 import { renderHonesty } from "./render/honesty.js";
@@ -26,11 +28,33 @@ const els = {
 // they render historical snapshots) can still report honest last-contact age.
 let lastKnownContact = new Date(0).toISOString();
 
+// Tracks the latest board state for the DMD controller's pull-based getBoard().
+// Every render path (live/replay/stale/idle) updates this so the DMD stays in
+// sync with whatever's on screen, even though it paints on its own clock.
+let lastBoard: BoardView = { mode: "idle", droids: [], celebrating: false };
+
+const CELEBRATE_WINDOW_MS = 10_000;
+
+// A chain hop of kind pr_merged within the last 10s of the snapshot's own
+// "now" (wall-clock for live, generated_at for replay) triggers the
+// celebration glyph across the board.
+function isCelebrating(chains: Chain[], nowMs: number): boolean {
+  for (const chain of chains) {
+    for (const hop of chain.hops) {
+      if (hop.kind !== "pr_merged") continue;
+      const age = nowMs - Date.parse(hop.at);
+      if (age >= 0 && age <= CELEBRATE_WINDOW_MS) return true;
+    }
+  }
+  return false;
+}
+
 function renderLive(snap: CurrentSnapshot): void {
   const now = Date.now();
   renderStations(els.stations, snap.droids, now);
   renderChains(els.chains, snap.chains);
   renderHonesty(els.honesty, { mode: "live", lastContact: snap.last_contact, nowMs: now });
+  lastBoard = { mode: "live", droids: snap.droids, celebrating: isCelebrating(snap.chains, now) };
 }
 
 async function refreshTickerFromFeed(): Promise<void> {
@@ -51,7 +75,8 @@ const replay = createReplayController({
   fetchBundle: (id) => fetchReplayBundle(DATA_BASE, id),
   makePlayer: (bundle, opts) => new ReplayPlayer(bundle, opts),
   onFrame: (snap, feed, label) => {
-    renderStations(els.stations, snap.droids, Date.parse(snap.generated_at));
+    const replayNow = Date.parse(snap.generated_at);
+    renderStations(els.stations, snap.droids, replayNow);
     renderChains(els.chains, snap.chains);
     renderTicker(els.ticker, feed);
     renderHonesty(els.honesty, {
@@ -60,13 +85,21 @@ const replay = createReplayController({
       nowMs: Date.now(),
       replayLabel: label,
     });
+    lastBoard = {
+      mode: "replay",
+      droids: snap.droids,
+      celebrating: isCelebrating(snap.chains, replayNow),
+    };
   },
   onIdle: (lastContact) => {
     // No curated replays available: say so plainly rather than leaving a
     // stale live/replay render standing silently.
     renderHonesty(els.honesty, { mode: "idle", lastContact, nowMs: Date.now() });
+    lastBoard = { mode: "idle", droids: lastBoard.droids, celebrating: false };
   },
 });
+
+startDmd({ root: els.stations, getBoard: () => lastBoard });
 
 startPolling({
   base: DATA_BASE,
@@ -84,6 +117,7 @@ startPolling({
         lastContact: snap.last_contact,
         nowMs: Date.now(),
       });
+      lastBoard = { mode: "stale", droids: lastBoard.droids, celebrating: false };
     } else {
       lastKnownContact = snap.last_contact;
       void replay.enter(snap.last_contact);
@@ -96,6 +130,7 @@ startPolling({
         lastContact: lastGood.last_contact,
         nowMs: Date.now(),
       });
+      lastBoard = { mode: "stale", droids: lastBoard.droids, celebrating: false };
     }
     lastKnownContact = lastGood?.last_contact ?? new Date(0).toISOString();
     void replay.enter(lastKnownContact);

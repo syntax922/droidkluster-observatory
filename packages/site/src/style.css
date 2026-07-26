@@ -40,6 +40,13 @@ body {
   font-size: 0.8rem;
   margin-top: 4px;
 }
+.station-dmd {
+  width: 100%;
+  image-rendering: pixelated;
+  background: #05070b;
+  border-radius: 3px;
+  margin-top: 6px;
+}
 [data-mode="stale"] {
   color: var(--warn);
 }

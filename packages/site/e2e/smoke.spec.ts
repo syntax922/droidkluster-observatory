@@ -6,6 +6,7 @@ test("board renders stations, chain, honesty strip from fixture data", async ({ 
   await expect(page.locator("#honesty")).toContainText("telemetry: live", { timeout: 10_000 });
   await expect(page.locator('[data-droid="hk-47"]')).toContainText("HK-47");
   await expect(page.locator("#chains .chain").first()).toBeVisible();
+  await expect(page.locator('canvas[data-dmd="hk-47"]')).toBeVisible();
 });
 
 test("clicking a station opens its dossier", async ({ page }) => {

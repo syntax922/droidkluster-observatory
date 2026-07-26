@@ -36,6 +36,13 @@ export function renderStations(el: HTMLElement, droids: DroidStatus[], nowMs: nu
     }
     card.appendChild(statusSpan);
 
+    const dmd = document.createElement("canvas");
+    dmd.className = "station-dmd";
+    dmd.dataset.dmd = d.droid;
+    dmd.width = 192;
+    dmd.height = 96;
+    card.appendChild(dmd);
+
     el.appendChild(card);
   }
 }
