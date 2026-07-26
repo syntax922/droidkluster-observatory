@@ -1,0 +1,57 @@
+import { describe, expect, it } from "vitest";
+import { readConfig, readR2Config } from "./config.js";
+
+const base = {
+  NATS_SERVERS: "nats://n1:4222,nats://n2:4222",
+  NATS_STREAM: "EVENTS",
+  NATS_DURABLE: "observatory-projector",
+  NATS_FILTER_SUBJECTS:
+    "gh.event.dungeonadventures.>,dungeonadventures.event.merge_decision.reached.>",
+  R2_ACCOUNT_ID: "acct",
+  R2_BUCKET: "observatory",
+  R2_ACCESS_KEY_ID: "k",
+  R2_SECRET_ACCESS_KEY: "s",
+};
+
+describe("readConfig", () => {
+  it("parses a complete env", () => {
+    const cfg = readConfig(base);
+    expect(cfg.natsServers).toEqual(["nats://n1:4222", "nats://n2:4222"]);
+    expect(cfg.filterSubjects).toHaveLength(2);
+    expect(cfg.pushEnabled).toBe(true); // default on
+  });
+  it("OBSERVATORY_PUSH_ENABLED=false is the kill switch", () => {
+    expect(readConfig({ ...base, OBSERVATORY_PUSH_ENABLED: "false" }).pushEnabled).toBe(false);
+  });
+  it("throws on missing required vars", () => {
+    const { NATS_SERVERS: _, ...rest } = base;
+    expect(() => readConfig(rest)).toThrow(/NATS_SERVERS/);
+  });
+  it("throws on a non-numeric PUSH_DEBOUNCE_MS", () => {
+    expect(() => readConfig({ ...base, PUSH_DEBOUNCE_MS: "abc" })).toThrow(/PUSH_DEBOUNCE_MS/);
+  });
+  it("filters empty entries from a trailing-comma NATS_SERVERS", () => {
+    const cfg = readConfig({ ...base, NATS_SERVERS: "nats://n1:4222," });
+    expect(cfg.natsServers).toEqual(["nats://n1:4222"]);
+  });
+});
+
+describe("readR2Config", () => {
+  it("succeeds with only the four R2 vars set — no NATS_* required", () => {
+    const r2 = readR2Config({
+      R2_ACCOUNT_ID: "acct",
+      R2_BUCKET: "observatory",
+      R2_ACCESS_KEY_ID: "k",
+      R2_SECRET_ACCESS_KEY: "s",
+    });
+    expect(r2).toEqual({
+      accountId: "acct",
+      bucket: "observatory",
+      accessKeyId: "k",
+      secretAccessKey: "s",
+    });
+  });
+  it("throws on a missing R2 var", () => {
+    expect(() => readR2Config({ R2_ACCOUNT_ID: "acct" })).toThrow(/R2_BUCKET/);
+  });
+});
