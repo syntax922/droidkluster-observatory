@@ -72,7 +72,7 @@ rather than degrading silently.
 
 | Variable | Example | Required | Secret | Notes |
 |---|---|---|---|---|
-| `NATS_SERVERS` | `nats://nats.droidkluster.internal:4222` | yes | no | Comma-separated list. Internal-only hostname, not a credential — but see the [threat model's residual-risk note](../THREAT_MODEL.md#residual-risks) on subject-naming exposure; the server address itself isn't reachable from outside the cluster. |
+| `NATS_SERVERS` | `nats://<nats-host>.internal:4222` | yes | no | Comma-separated list. Internal-only hostname, not a credential — but see the [threat model's residual-risk note](../THREAT_MODEL.md#residual-risks) on subject-naming exposure; the server address itself isn't reachable from outside the cluster. |
 | `NATS_NKEY_SEED_FILE` | `/etc/observatory/nats.nk` | no | **yes** | Path to an NKey seed file. The path itself isn't sensitive; the file it points to is the actual credential and must be mounted from the cluster secret store, never committed. |
 | `NATS_CA_FILE` | `/etc/observatory/ca.pem` | no | no | Path to a CA cert for TLS verification, if the NATS server needs one. Public cert material. |
 | `NATS_STREAM` | `dungeonadventures` | yes | no | JetStream stream name. |
@@ -122,11 +122,23 @@ private-deployment split described in
 
 ## 6. Curating a replay
 
+Both the curation CLI (`curate.js`) and the recording-ingest CLI
+(`ingest.js`) only ever touch the R2 bucket — they never open a NATS
+connection — so they need just the four `R2_*` variables from the table
+above (`R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`,
+`R2_SECRET_ACCESS_KEY`), not the full projector env contract
+(`NATS_SERVERS` etc.). `readR2Config()` in
+[`packages/projector/src/config.ts`](../packages/projector/src/config.ts)
+enforces exactly that: it's the same fail-fast `req()` check as
+`readConfig()`, scoped to only the four R2 vars.
+
+### Path A — live chain, auto-captured by the running projector
+
 Once the projector is running and has captured at least one completed PR
 lifecycle chain (auto-captured on `pr_merged`/`pr_closed` — see
-`packages/projector/src/capture.ts`), promote it into the public replay
-rotation with the bundled CLI, run against the same R2 credentials as the
-projector:
+`packages/projector/src/capture.ts`), it's already sitting in the bucket
+at `chains/<id>.json`. Promote it into the public replay rotation with the
+bundled CLI, run against the same R2 credentials as the projector:
 
 ```bash
 node packages/projector/dist/curate.js promote \
@@ -138,3 +150,34 @@ node packages/projector/dist/curate.js promote \
 This reads `chains/<id>.json` from the bucket, writes it to
 `replays/<id>.json`, and prepends it to `replays/index.json` — the site's
 idle-state replay rotation reads from that index.
+
+### Path B — inaugural replay, from a private build-window recording
+
+Before the projector has been live long enough to auto-capture a chain
+(e.g. the very first deploy), `ingest.js` converts a private JSONL
+recording of canon envelopes into sanitized bundles on local disk — see
+[`packages/projector/src/ingest.ts`](../packages/projector/src/ingest.ts).
+`curate.js promote` only ever reads from `chains/<id>.json` **in the
+bucket**, so an ingest-produced bundle has to be uploaded there first —
+this is the bridge step that's easy to miss:
+
+```bash
+# 1. Convert the recording to bundle(s) on disk.
+node packages/projector/dist/ingest.js --input recording.jsonl --out ./out
+
+# 2. Bridge: upload each bundle into the bucket under chains/<id>.json —
+#    the same key space curate.js promote reads from. Either tool works
+#    as long as it authenticates with the bucket-scoped R2 token from
+#    step 1.3 above:
+npx wrangler r2 object put observatory/chains/pr-1607-2026-07-23.json \
+  --file ./out/pr-1607-2026-07-23.json
+#    ...or any S3-compatible client (aws s3 cp, rclone, etc.) pointed at
+#    https://<R2_ACCOUNT_ID>.r2.cloudflarestorage.com with the same
+#    R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY.
+
+# 3. Promote, same as Path A.
+node packages/projector/dist/curate.js promote \
+  --chain pr-1607-2026-07-23 \
+  --title "CI red to merge in 41 minutes" \
+  --summary "..."
+```
