@@ -22,6 +22,10 @@ export async function main(): Promise<void> {
   const feedByDay = new Map<string, PublicEvent[]>();
 
   const writer = new EdgeWriter(cfg.r2);
+  // Tracks live NATS connection health so the heartbeat can skip pushing a
+  // last_contact that would otherwise lie about freshness while we're
+  // disconnected/erroring — see the status watcher spawned after connect().
+  let natsHealthy = true;
   const loop = startPushLoop({
     enabled: cfg.pushEnabled,
     writer,
@@ -32,6 +36,7 @@ export async function main(): Promise<void> {
     },
     debounceMs: cfg.debounceMs,
     heartbeatMs: cfg.heartbeatMs,
+    isHealthy: () => natsHealthy,
     log,
   });
 
@@ -46,6 +51,22 @@ export async function main(): Promise<void> {
     maxReconnectAttempts: -1,
   });
   log("connected", { servers: cfg.natsServers });
+
+  // Mark unhealthy on disconnect/async-error, healthy again on reconnect.
+  // Only these two transitions matter for last_contact honesty; other
+  // status events (ldm, update, debug reconnecting/pingTimer/etc.) don't
+  // change whether the connection can currently deliver messages.
+  void (async () => {
+    for await (const s of nc.status()) {
+      if (s.type === "disconnect" || s.type === "error") {
+        natsHealthy = false;
+        log("nats unhealthy", { type: s.type });
+      } else if (s.type === "reconnect") {
+        natsHealthy = true;
+        log("nats healthy", { type: s.type });
+      }
+    }
+  })();
 
   const jsm = await nc.jetstreamManager();
   // Durable consumer with deliver_policy: new — first boot starts from "now" (no backlog
@@ -97,6 +118,16 @@ export async function main(): Promise<void> {
       m.ack();
     }
   }
+
+  // The consume() iterator only ends when the consumer or stream was
+  // deleted server-side, or the connection closed permanently — either way
+  // this process can no longer receive events and must not keep
+  // heartbeating a healthy-looking last_contact while deaf. Stop the push
+  // loop and throw so the process exits non-zero and the pod restarts.
+  loop.stop();
+  throw new Error(
+    "NATS consume iterator ended — consumer/stream deleted or connection closed; exiting for restart",
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

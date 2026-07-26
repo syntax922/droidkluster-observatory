@@ -8,6 +8,14 @@ export interface PushLoopOpts {
   getFeedDay: () => { key: string; events: PublicEvent[] };
   debounceMs: number;
   heartbeatMs: number;
+  /**
+   * Reports whether the upstream NATS connection is currently healthy.
+   * Optional — when omitted, the heartbeat always pushes (back-compat for
+   * callers that don't track connection health). Only the heartbeat consults
+   * this; event-driven pushes (`markDirty`) imply health because they only
+   * fire when a message was just consumed.
+   */
+  isHealthy?: () => boolean;
   log: (msg: string, extra?: object) => void;
 }
 
@@ -28,7 +36,13 @@ export function startPushLoop(opts: PushLoopOpts): { markDirty: () => void; stop
     }
   }
 
-  const heartbeat = setInterval(() => void pushAll(false), opts.heartbeatMs);
+  const heartbeat = setInterval(() => {
+    if (opts.isHealthy && !opts.isHealthy()) {
+      opts.log("heartbeat skipped: nats unhealthy");
+      return;
+    }
+    void pushAll(false);
+  }, opts.heartbeatMs);
 
   return {
     markDirty: () => {

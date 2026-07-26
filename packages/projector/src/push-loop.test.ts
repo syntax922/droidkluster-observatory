@@ -46,6 +46,41 @@ describe("startPushLoop", () => {
     loop.stop();
   });
 
+  it("heartbeat: isHealthy=false skips the push (last_contact stays honest)", async () => {
+    const writer = makeWriter();
+    const loop = startPushLoop({
+      enabled: true,
+      writer: writer as never,
+      getSnapshot: () => snapshot as never,
+      getFeedDay: () => ({ key: "feed/x.json", events: [] }),
+      debounceMs: 1000,
+      heartbeatMs: 5000,
+      isHealthy: () => false,
+      log: () => {},
+    });
+    await vi.advanceTimersByTimeAsync(5100);
+    expect(writer.putJson).not.toHaveBeenCalled();
+    loop.stop();
+  });
+
+  it("markDirty-driven push still works while isHealthy=false", async () => {
+    const writer = makeWriter();
+    const loop = startPushLoop({
+      enabled: true,
+      writer: writer as never,
+      getSnapshot: () => snapshot as never,
+      getFeedDay: () => ({ key: "feed/2026-07-25.json", events: [] }),
+      debounceMs: 1000,
+      heartbeatMs: 60_000,
+      isHealthy: () => false,
+      log: () => {},
+    });
+    loop.markDirty();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(writer.putJson).toHaveBeenCalledWith("current.json", snapshot, 15);
+    loop.stop();
+  });
+
   it("kill switch: enabled=false never pushes", async () => {
     const writer = makeWriter();
     const loop = startPushLoop({
