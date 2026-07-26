@@ -1,0 +1,35 @@
+{
+  "generated_at": "2099-01-01T00:00:00Z",
+  "last_contact": "2099-01-01T00:00:00Z",
+  "droids": [
+    {
+      "droid": "hk-47",
+      "state": "active",
+      "task": "reviewing pr",
+      "since": "2099-01-01T00:00:00Z"
+    },
+    { "droid": "2-1b", "state": "idle", "last_action": "diagnosed CI failure" }
+  ],
+  "chains": [
+    {
+      "pr": 42,
+      "hops": [
+        {
+          "at": "2099-01-01T00:00:00Z",
+          "droid": "system",
+          "kind": "pr_opened",
+          "label": "PR opened"
+        },
+        {
+          "at": "2099-01-01T00:00:30Z",
+          "droid": "hk-47",
+          "kind": "review_started",
+          "label": "review started"
+        }
+      ],
+      "updated_at": "2099-01-01T00:00:30Z",
+      "active": true,
+      "complete": false
+    }
+  ]
+}
