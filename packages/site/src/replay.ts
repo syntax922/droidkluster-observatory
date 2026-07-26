@@ -107,7 +107,7 @@ function syntheticSubject(e: PublicEvent): string {
   }
 }
 
-function syntheticPayload(e: PublicEvent): unknown {
+function syntheticPayload(e: PublicEvent): Record<string, unknown> {
   const verdictMatch = /review (\w+)/.exec(e.summary);
   switch (e.kind) {
     case "pr_opened":

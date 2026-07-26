@@ -1,4 +1,4 @@
-import type { ReplayBundle } from "@observatory/core";
+import type { CurrentSnapshot, ReplayBundle } from "@observatory/core";
 import { describe, expect, it, vi } from "vitest";
 import { ReplayPlayer, pickCompression, replayLabel } from "./replay.js";
 
@@ -95,8 +95,9 @@ describe("ReplayPlayer", () => {
     vi.useRealTimers();
   });
 
-  it("round-trip all 10 PublicEventKinds preserves summary fidelity", () => {
+  it("round-trip all 10 PublicEventKinds preserves summary fidelity via reduce", () => {
     vi.useFakeTimers();
+    // Use exact reducer-generated summaries from classify() in reduce.ts
     const allEvents = [
       {
         id: "e1",
@@ -109,7 +110,7 @@ describe("ReplayPlayer", () => {
       {
         id: "e2",
         at: "2026-07-25T00:01:00Z",
-        droid: "hk-47" as const,
+        droid: "system" as const,
         kind: "review_requested" as const,
         pr: 42,
         summary: "review requested · PR #42",
@@ -120,7 +121,7 @@ describe("ReplayPlayer", () => {
         droid: "hk-47" as const,
         kind: "review_started" as const,
         pr: 42,
-        summary: "review started · PR #42",
+        summary: "HK-47 review started · PR #42",
       },
       {
         id: "e4",
@@ -133,10 +134,10 @@ describe("ReplayPlayer", () => {
       {
         id: "e5",
         at: "2026-07-25T00:04:00Z",
-        droid: "system" as const,
+        droid: "2-1b" as const,
         kind: "check_run" as const,
         pr: 42,
-        summary: "CI success (test-unit) · PR #42",
+        summary: "CI red (test-unit) · PR #42",
       },
       {
         id: "e6",
@@ -165,10 +166,10 @@ describe("ReplayPlayer", () => {
       {
         id: "e9",
         at: "2026-07-25T00:08:00Z",
-        droid: "system" as const,
+        droid: "tt-8l" as const,
         kind: "merge_decision" as const,
         pr: 42,
-        summary: "decision: APPROVED · PR #42",
+        summary: "merge decision: APPROVED · PR #42",
       },
       {
         id: "e10",
@@ -188,20 +189,26 @@ describe("ReplayPlayer", () => {
       events: allEvents,
     };
 
-    const feedSummaries: string[] = [];
+    const snapshots: CurrentSnapshot[] = [];
     const player = new ReplayPlayer(testBundle, {
       compression: 1000,
-      onFrame: (snap, feed) => {
-        feedSummaries.push(feed[feed.length - 1]?.summary ?? "");
+      onFrame: (snap: CurrentSnapshot) => {
+        snapshots.push(snap);
       },
       onDone: () => {},
     });
     player.start();
-    expect(feedSummaries).toHaveLength(1); // first event fires immediately
+    expect(snapshots).toHaveLength(1); // first event fires immediately
     // Events span 9 minutes (540 seconds), divided by compression (1000) = 540ms
     vi.advanceTimersByTime(600);
-    expect(feedSummaries).toHaveLength(10);
-    expect(feedSummaries).toEqual(allEvents.map((e) => e.summary));
+    expect(snapshots).toHaveLength(10);
+    // Assert against chain hops (reducer output), not input feed
+    const finalSnap = snapshots[snapshots.length - 1];
+    expect(finalSnap).toBeDefined();
+    const chain = finalSnap?.chains.find((c) => c.pr === 42);
+    expect(chain?.hops).toBeTruthy();
+    const hopLabels = chain?.hops?.map((h) => h.label) ?? [];
+    expect(hopLabels).toEqual(allEvents.map((e) => e.summary));
     vi.useRealTimers();
   });
 });
