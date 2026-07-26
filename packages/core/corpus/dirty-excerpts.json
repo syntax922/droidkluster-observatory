@@ -1,13 +1,13 @@
 [
   {
     "name": "internal hostname",
-    "dirty": "Deploy failed reaching redis-bgp.droidkluster.internal on boot",
+    "dirty": "Deploy failed reaching svc-cache.droidkluster.internal on boot",
     "mustNotContain": ["droidkluster.internal"]
   },
   {
     "name": "raw ipv4",
-    "dirty": "Connection refused to 10.21.1.11:6379 during startup",
-    "mustNotContain": ["10.21.1.11"]
+    "dirty": "Connection refused to 192.0.2.11:6379 during startup",
+    "mustNotContain": ["192.0.2.11"]
   },
   {
     "name": "ipv6",
@@ -36,8 +36,8 @@
   },
   {
     "name": "internal url",
-    "dirty": "Gateway at http://litellm.droidkluster.com:4000/v1 timed out",
-    "mustNotContain": ["litellm.droidkluster.com"]
+    "dirty": "Gateway at http://llm-gw.droidkluster.com:4000/v1 timed out",
+    "mustNotContain": ["llm-gw.droidkluster.com"]
   },
   {
     "name": "clean review prose survives",
