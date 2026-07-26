@@ -155,13 +155,29 @@ function syntheticPayload(e: PublicEvent): Record<string, unknown> {
     case "pr_closed":
       return { action: "closed", pull_request: { number: pr, merged: false } };
     case "issue_dispatched":
-      return { issue_number: e.issue, command_id: `replay-${e.id}` };
-    case "coder_completed":
       return {
-        kind: e.pr !== undefined ? "rework" : "issue",
-        pr_number: e.pr,
         issue_number: e.issue,
-        status: "no_changes",
+        command_id: `replay-${e.id}`,
+        repository: { full_name: "replay/replay" },
       };
+    case "coder_completed": {
+      const status = /coder (\w+)/.exec(e.summary)?.[1] ?? "completed";
+      const opened = /opened from issue #(\d+)/.exec(e.summary);
+      return opened
+        ? {
+            kind: "issue",
+            pr_number: e.pr,
+            issue_number: Number(opened[1]),
+            status: "opened",
+            exit_code: 0,
+          }
+        : {
+            kind: e.pr !== undefined ? "rework" : "issue",
+            ...(e.pr !== undefined ? { pr_number: e.pr } : {}),
+            ...(e.issue !== undefined ? { issue_number: e.issue } : {}),
+            status,
+            exit_code: 0,
+          };
+    }
   }
 }

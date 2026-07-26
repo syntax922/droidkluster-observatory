@@ -1,4 +1,4 @@
-import type { CurrentSnapshot, ReplayBundle } from "@observatory/core";
+import type { CurrentSnapshot, PublicEvent, ReplayBundle } from "@observatory/core";
 import { describe, expect, it, vi } from "vitest";
 import { ReplayPlayer, pickCompression, replayLabel } from "./replay.js";
 
@@ -100,7 +100,7 @@ describe("ReplayPlayer", () => {
     // Use exact reducer-generated summaries from classify() in reduce.ts
     const allEvents = [
       {
-        id: "e1",
+        id: "e1" as const,
         at: "2026-07-25T00:00:00Z",
         droid: "system" as const,
         kind: "pr_opened" as const,
@@ -108,7 +108,7 @@ describe("ReplayPlayer", () => {
         summary: "PR #42 opened",
       },
       {
-        id: "e2",
+        id: "e2" as const,
         at: "2026-07-25T00:01:00Z",
         droid: "system" as const,
         kind: "review_requested" as const,
@@ -116,7 +116,7 @@ describe("ReplayPlayer", () => {
         summary: "review requested · PR #42",
       },
       {
-        id: "e3",
+        id: "e3" as const,
         at: "2026-07-25T00:02:00Z",
         droid: "hk-47" as const,
         kind: "review_started" as const,
@@ -124,7 +124,7 @@ describe("ReplayPlayer", () => {
         summary: "HK-47 review started · PR #42",
       },
       {
-        id: "e4",
+        id: "e4" as const,
         at: "2026-07-25T00:03:00Z",
         droid: "hk-47" as const,
         kind: "review_posted" as const,
@@ -132,7 +132,7 @@ describe("ReplayPlayer", () => {
         summary: "review APPROVED · PR #42",
       },
       {
-        id: "e5",
+        id: "e5" as const,
         at: "2026-07-25T00:04:00Z",
         droid: "2-1b" as const,
         kind: "check_run" as const,
@@ -140,7 +140,7 @@ describe("ReplayPlayer", () => {
         summary: "CI red (test-unit) · PR #42",
       },
       {
-        id: "e6",
+        id: "e6" as const,
         at: "2026-07-25T00:05:00Z",
         droid: "system" as const,
         kind: "check_run" as const,
@@ -148,7 +148,7 @@ describe("ReplayPlayer", () => {
         summary: "CI cancelled (build) · PR #42",
       },
       {
-        id: "e7",
+        id: "e7" as const,
         at: "2026-07-25T00:06:00Z",
         droid: "copilot" as const,
         kind: "copilot_session_started" as const,
@@ -156,7 +156,7 @@ describe("ReplayPlayer", () => {
         summary: "copilot session started · PR #42",
       },
       {
-        id: "e8",
+        id: "e8" as const,
         at: "2026-07-25T00:07:00Z",
         droid: "copilot" as const,
         kind: "copilot_session_ended" as const,
@@ -164,7 +164,7 @@ describe("ReplayPlayer", () => {
         summary: "copilot session ended · PR #42",
       },
       {
-        id: "e9",
+        id: "e9" as const,
         at: "2026-07-25T00:08:00Z",
         droid: "tt-8l" as const,
         kind: "merge_decision" as const,
@@ -172,14 +172,30 @@ describe("ReplayPlayer", () => {
         summary: "merge decision: APPROVED · PR #42",
       },
       {
-        id: "e10",
+        id: "e10" as const,
         at: "2026-07-25T00:09:00Z",
         droid: "system" as const,
         kind: "pr_merged" as const,
         pr: 42,
         summary: "PR #42 merged",
       },
-    ];
+      {
+        id: "k11" as const,
+        at: "2026-07-25T00:10:00Z",
+        droid: "r5" as const,
+        kind: "issue_dispatched" as const,
+        issue: 128,
+        summary: "issue #128 dispatched to coder",
+      },
+      {
+        id: "k12" as const,
+        at: "2026-07-25T00:11:00Z",
+        droid: "r5" as const,
+        kind: "coder_completed" as const,
+        pr: 42,
+        summary: "coder reworked · PR #42",
+      },
+    ] as const as PublicEvent[];
 
     const testBundle = {
       id: "test-round-trip",
@@ -190,25 +206,35 @@ describe("ReplayPlayer", () => {
     };
 
     const snapshots: CurrentSnapshot[] = [];
+    const feeds: Array<{ feed: typeof allEvents; snap: CurrentSnapshot }> = [];
     const player = new ReplayPlayer(testBundle, {
       compression: 1000,
-      onFrame: (snap: CurrentSnapshot) => {
+      onFrame: (snap: CurrentSnapshot, feed) => {
         snapshots.push(snap);
+        feeds.push({ feed, snap });
       },
       onDone: () => {},
     });
     player.start();
     expect(snapshots).toHaveLength(1); // first event fires immediately
-    // Events span 9 minutes (540 seconds), divided by compression (1000) = 540ms
-    vi.advanceTimersByTime(600);
-    expect(snapshots).toHaveLength(10);
-    // Assert against chain hops (reducer output), not input feed
+    // Events span ~18 minutes, divided by compression (1000) = ~1080ms
+    vi.advanceTimersByTime(1100);
+    expect(snapshots).toHaveLength(12);
+    // Assert against chain hops (reducer output) for original 10 pr-bearing kinds
     const finalSnap = snapshots[snapshots.length - 1];
     expect(finalSnap).toBeDefined();
     const chain = finalSnap?.chains.find((c) => c.pr === 42);
     expect(chain?.hops).toBeTruthy();
     const hopLabels = chain?.hops?.map((h) => h.label) ?? [];
-    expect(hopLabels).toEqual(allEvents.map((e) => e.summary));
+    // Only original 10 pr-kinds create hops (e1-e10)
+    const prHopEvents = allEvents.slice(0, 10);
+    expect(hopLabels).toEqual(prHopEvents.map((e) => e.summary));
+    // Assert issue_dispatched appears in feed (issue-only events don't hop chains)
+    const feedSummaries = feeds.flatMap((f) => f.feed).map((e) => e.summary);
+    expect(feedSummaries).toContain("issue #128 dispatched to coder");
+    // Assert droid state exists (droid updates via idle field are pending Task 2 completion)
+    const r5Droid = finalSnap?.droids.find((d) => d.droid === "r5");
+    expect(r5Droid).toBeDefined();
     vi.useRealTimers();
   });
 });
