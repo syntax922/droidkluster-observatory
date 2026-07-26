@@ -47,7 +47,7 @@ export class ReplayPlayer {
     const t0 = Date.parse(this.bundle.events[0]?.at ?? new Date(0).toISOString());
 
     this.bundle.events.forEach((event, i) => {
-      const delayMs = ((Date.parse(event.at) - t0) / this.opts.compression) | 0;
+      const delayMs = Math.trunc((Date.parse(event.at) - t0) / this.opts.compression);
       const fire = (): void => {
         if (this.stopped) return;
         reduce(state, {
@@ -61,8 +61,11 @@ export class ReplayPlayer {
         this.opts.onFrame(toSnapshot(state, new Date(event.at)), feed, label);
         if (i === this.bundle.events.length - 1) this.opts.onDone();
       };
-      if (delayMs <= 0) fire();
-      else this.timers.push(setTimeout(fire, delayMs));
+      if (delayMs <= 0) {
+        if (!this.stopped) fire();
+      } else {
+        if (!this.stopped) this.timers.push(setTimeout(fire, delayMs));
+      }
     });
   }
 
@@ -70,6 +73,11 @@ export class ReplayPlayer {
     this.stopped = true;
     for (const t of this.timers) clearTimeout(t);
     this.timers = [];
+  }
+
+  // @internal
+  pendingTimerCount(): number {
+    return this.timers.length;
   }
 }
 
@@ -102,6 +110,12 @@ function syntheticSubject(e: PublicEvent): string {
 function syntheticPayload(e: PublicEvent): unknown {
   const verdictMatch = /review (\w+)/.exec(e.summary);
   switch (e.kind) {
+    case "pr_opened":
+      return { action: "opened", pull_request: { number: e.pr } };
+    case "review_requested":
+      return { action: "review_requested", pull_request: { number: e.pr } };
+    case "review_started":
+      return { action: "review_started", pull_request: { number: e.pr } };
     case "review_posted":
       return {
         action: "submitted",
@@ -112,24 +126,28 @@ function syntheticPayload(e: PublicEvent): unknown {
         pull_request: { number: e.pr },
       };
     case "check_run": {
-      const red = e.summary.includes("CI red");
+      const conclusion = e.summary.startsWith("CI red")
+        ? "failure"
+        : (/^CI (\w+)/.exec(e.summary)?.[1] ?? "success");
       const name = /\(([^)]+)\)/.exec(e.summary)?.[1] ?? "check";
       return {
         action: "completed",
         check_run: {
           name,
-          conclusion: red ? "failure" : "success",
+          conclusion,
           pull_requests: [{ number: e.pr }],
         },
       };
     }
+    case "copilot_session_started":
+      return { action: "started", pull_request: { number: e.pr } };
+    case "copilot_session_ended":
+      return { action: "ended", pull_request: { number: e.pr } };
     case "merge_decision":
       return { pr_number: e.pr, verdict: /decision: (\w+)/.exec(e.summary)?.[1] ?? "DECIDED" };
     case "pr_merged":
       return { action: "closed", pull_request: { number: e.pr, merged: true } };
     case "pr_closed":
       return { action: "closed", pull_request: { number: e.pr, merged: false } };
-    default:
-      return { action: "x", pull_request: { number: e.pr } };
   }
 }
