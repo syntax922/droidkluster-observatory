@@ -68,5 +68,10 @@
     "name": "version-prefixed ip",
     "dirty": "Upgraded to v10.99.88.77 successfully",
     "mustNotContain": ["10.99.88.77"]
+  },
+  {
+    "name": "single-label service host",
+    "dirty": "Backend at internal-svc:8080 and cache at redis:6379 down",
+    "mustNotContain": ["internal-svc:8080", "redis:6379"]
   }
 ]

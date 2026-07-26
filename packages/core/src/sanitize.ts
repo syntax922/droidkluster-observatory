@@ -3,11 +3,18 @@ const REDACTED = "[redacted]";
 const PRE_CAP = 4000;
 
 // Order matters: URL/hostname rules run before the bare-IP rule so a host:port
-// inside a URL is killed as one unit. Private-TLD rule is linear (no backtracking).
+// inside a URL is killed as one unit. DoS containment comes from PRE_CAP bounding
+// regex input to 4000 chars before any rule runs — the rules themselves are NOT
+// asymptotically linear. Do not raise or remove PRE_CAP without re-timing
+// adversarial inputs (see task-3 review).
 const KILL_RULES: Array<{ name: string; re: RegExp }> = [
   { name: "url", re: /\bhttps?:\/\/[^\s)]+/gi },
   { name: "internal-host", re: /\b[\w.-]*droidkluster\.(internal|com)\b(:\d+)?/gi },
   { name: "host-port", re: /\b[\w-]+(?:\.[\w-]+)+:\d{2,5}\b/g },
+  {
+    name: "bare-service-port",
+    re: /\b(?=[\w-]*[a-z])[\w-]+:\d{2,5}\b/gi,
+  },
   {
     name: "private-tld-host",
     re: /\b[\w.-]+\.(internal|local|lan|corp|home|cluster|svc|intra)\b(:\d+)?/gi,
