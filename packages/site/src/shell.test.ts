@@ -27,6 +27,18 @@ describe("decideMode", () => {
       ),
     ).toBe("live");
   });
+  it("live when a chain just completed (not active) but finished moments ago", () => {
+    expect(
+      decideMode(
+        snap({
+          chains: [
+            { pr: 1, hops: [], updated_at: "2026-07-25T13:59:50Z", active: false, complete: true },
+          ],
+        }),
+        NOW,
+      ),
+    ).toBe("live");
+  });
   it("replay when telemetry fresh but nothing active for 10+ min", () => {
     expect(
       decideMode(
