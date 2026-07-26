@@ -74,4 +74,17 @@ describe("ingest", () => {
     expect(ingest(input, dir)).toEqual([]);
     expect(readdirSync(dir).filter((f) => f.endsWith(".json"))).toEqual([]);
   });
+
+  it("creates output directory if it does not exist", () => {
+    const tempBase = mkdtempSync(join(tmpdir(), "ingest-"));
+    const outDir = join(tempBase, "nonexistent", "subdir");
+    const input = join(tempBase, "rec.jsonl");
+    writeFileSync(input, lines.map((l) => JSON.stringify(l)).join("\n"));
+    const written = ingest(input, outDir);
+    expect(written).toEqual(["pr-42-2026-07-25.json"]);
+    const bundle = ReplayBundleSchema.parse(
+      JSON.parse(readFileSync(join(outDir, "pr-42-2026-07-25.json"), "utf8")),
+    );
+    expect(bundle.events.length).toBeGreaterThanOrEqual(3);
+  });
 });
