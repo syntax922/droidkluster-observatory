@@ -1,4 +1,4 @@
-import type { CurrentSnapshot, DroidId, PublicEvent, ReplayBundle } from "@observatory/core";
+import type { CurrentSnapshot, DroidId, PublicEvent } from "@observatory/core";
 import { DroidIdSchema } from "@observatory/core";
 import { fetchReplayBundle, fetchReplayIndex, startPolling } from "./data.js";
 import { renderChains } from "./render/chains.js";
@@ -6,7 +6,8 @@ import { renderDossier } from "./render/dossier.js";
 import { renderHonesty } from "./render/honesty.js";
 import { renderStations } from "./render/stations.js";
 import { renderTicker } from "./render/ticker.js";
-import { ReplayPlayer, pickCompression, replayLabel } from "./replay.js";
+import { createReplayController } from "./replay-controller.js";
+import { ReplayPlayer } from "./replay.js";
 import { decideMode } from "./shell.js";
 import "./style.css";
 
@@ -21,9 +22,9 @@ const els = {
   dossier: document.querySelector("#dossier") as HTMLElement,
 };
 
-let player: ReplayPlayer | null = null;
-let replayIds: string[] = [];
-let replayCursor = 0;
+// Tracks the last known heartbeat so replay frames (which don't carry it —
+// they render historical snapshots) can still report honest last-contact age.
+let lastKnownContact = new Date(0).toISOString();
 
 function renderLive(snap: CurrentSnapshot): void {
   const now = Date.now();
@@ -45,42 +46,27 @@ async function refreshTickerFromFeed(): Promise<void> {
   }
 }
 
-async function enterReplay(lastContact: string): Promise<void> {
-  if (player) return; // already replaying
-  if (replayIds.length === 0) {
-    const index = await fetchReplayIndex(DATA_BASE);
-    replayIds = index?.replays.map((r) => r.id) ?? [];
-  }
-  const id = replayIds[replayCursor % Math.max(1, replayIds.length)];
-  if (!id) return; // no curated replays yet: board stays on last live render
-  replayCursor += 1;
-  const bundle: ReplayBundle | null = await fetchReplayBundle(DATA_BASE, id);
-  if (!bundle) return;
-  const compression = pickCompression(bundle);
-  player = new ReplayPlayer(bundle, {
-    compression,
-    onFrame: (snap, feed, label) => {
-      renderStations(els.stations, snap.droids, Date.parse(snap.generated_at));
-      renderChains(els.chains, snap.chains);
-      renderTicker(els.ticker, feed);
-      renderHonesty(els.honesty, {
-        mode: "replay",
-        lastContact,
-        nowMs: Date.now(),
-        replayLabel: label,
-      });
-    },
-    onDone: () => {
-      player = null; // next tick picks the next bundle (or live preempts)
-    },
-  });
-  player.start();
-}
-
-function exitReplay(): void {
-  player?.stop();
-  player = null;
-}
+const replay = createReplayController({
+  fetchIndex: () => fetchReplayIndex(DATA_BASE),
+  fetchBundle: (id) => fetchReplayBundle(DATA_BASE, id),
+  makePlayer: (bundle, opts) => new ReplayPlayer(bundle, opts),
+  onFrame: (snap, feed, label) => {
+    renderStations(els.stations, snap.droids, Date.parse(snap.generated_at));
+    renderChains(els.chains, snap.chains);
+    renderTicker(els.ticker, feed);
+    renderHonesty(els.honesty, {
+      mode: "replay",
+      lastContact: lastKnownContact,
+      nowMs: Date.now(),
+      replayLabel: label,
+    });
+  },
+  onIdle: (lastContact) => {
+    // No curated replays available: say so plainly rather than leaving a
+    // stale live/replay render standing silently.
+    renderHonesty(els.honesty, { mode: "idle", lastContact, nowMs: Date.now() });
+  },
+});
 
 startPolling({
   base: DATA_BASE,
@@ -88,18 +74,19 @@ startPolling({
   onSnapshot: (snap) => {
     const mode = decideMode(snap, Date.now());
     if (mode === "live") {
-      exitReplay();
+      replay.exit();
       renderLive(snap);
       void refreshTickerFromFeed();
     } else if (mode === "stale") {
-      exitReplay();
+      replay.exit();
       renderHonesty(els.honesty, {
         mode: "stale",
         lastContact: snap.last_contact,
         nowMs: Date.now(),
       });
     } else {
-      void enterReplay(snap.last_contact);
+      lastKnownContact = snap.last_contact;
+      void replay.enter(snap.last_contact);
     }
   },
   onStale: (lastGood) => {
@@ -110,7 +97,8 @@ startPolling({
         nowMs: Date.now(),
       });
     }
-    void enterReplay(lastGood?.last_contact ?? new Date(0).toISOString());
+    lastKnownContact = lastGood?.last_contact ?? new Date(0).toISOString();
+    void replay.enter(lastKnownContact);
   },
 });
 
