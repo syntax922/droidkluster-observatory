@@ -131,4 +131,92 @@ describe("reduce", () => {
     // Title text stays private: summaries reference PR number only.
     expect(JSON.stringify(emitted)).not.toContain("Fix disposition ladder");
   });
+
+  it("malicious check_run name is scrubbed from summary and task", () => {
+    const s = reduce(emptyFleetState(), prOpened).state;
+    const { state, emitted } = reduce(
+      s,
+      env("gh.event.dungeonadventures.check_run.completed.1700", {
+        action: "completed",
+        check_run: {
+          name: "deploy https://internal-secrets.droidkluster.internal/x token ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6",
+          conclusion: "failure",
+          head_sha: "abc",
+          pull_requests: [{ number: 1700 }],
+        },
+        repository: { full_name: "x/d" },
+      }),
+    );
+    expect(state.droids["2-1b"].task).not.toContain("droidkluster.internal");
+    expect(state.droids["2-1b"].task).not.toContain("ghp_");
+    const summary = emitted[0]?.summary ?? "";
+    expect(summary).not.toContain("droidkluster.internal");
+    expect(summary).not.toContain("ghp_");
+  });
+
+  it("copilot_session started activates copilot and idles 2-1b", () => {
+    const { state } = reduce(
+      emptyFleetState(),
+      env("gh.event.dungeonadventures.copilot_session.started.1700", {}),
+    );
+    expect(state.droids.copilot.task).toBe("implementing on PR #1700");
+    expect(state.droids["2-1b"].last_action).toContain("diagnosis delivered");
+  });
+
+  it("copilot_session ended idles copilot", () => {
+    const { state } = reduce(
+      emptyFleetState(),
+      env("gh.event.dungeonadventures.copilot_session.ended.1700", {}),
+    );
+    expect(state.droids.copilot.task).toBeUndefined();
+    expect(state.droids.copilot.last_action).toContain("session ended");
+  });
+
+  it("review_requested emits a system hop", () => {
+    const { state, emitted } = reduce(
+      emptyFleetState(),
+      env("gh.event.dungeonadventures.pr.review_requested.1700", {
+        pull_request: { number: 1700 },
+        repository: { full_name: "x/d" },
+      }),
+    );
+    expect(emitted[0]?.kind).toBe("review_requested");
+    expect(emitted[0]?.droid).toBe("system");
+    const chain = state.chains.get(1700);
+    expect(chain?.hops[0]?.kind).toBe("review_requested");
+  });
+
+  it("successful check_run does not activate 2-1b", () => {
+    const s = reduce(emptyFleetState(), prOpened).state;
+    const { state, emitted } = reduce(
+      s,
+      env("gh.event.dungeonadventures.check_run.completed.1700", {
+        action: "completed",
+        check_run: {
+          name: "test-unit",
+          conclusion: "success",
+          head_sha: "abc",
+          pull_requests: [{ number: 1700 }],
+        },
+        repository: { full_name: "x/d" },
+      }),
+    );
+    expect(state.droids["2-1b"].task).toBeUndefined();
+    expect(emitted[0]?.droid).toBe("system");
+  });
+
+  it("unexpected review state falls back to COMMENTED", () => {
+    const { state, emitted } = reduce(
+      emptyFleetState(),
+      env("gh.event.dungeonadventures.pull_request_review.submitted.1700", {
+        action: "submitted",
+        review: { state: "sneaky<script>", body: "safe text" },
+        pull_request: { number: 1700, head: { sha: "abc" } },
+        repository: { full_name: "x/d" },
+      }),
+    );
+    const summary = emitted[0]?.summary ?? "";
+    expect(summary).toContain("COMMENTED");
+    expect(summary.toUpperCase()).not.toContain("SNEAKY");
+  });
 });
