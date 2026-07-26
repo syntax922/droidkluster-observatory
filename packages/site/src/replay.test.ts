@@ -226,11 +226,21 @@ describe("ReplayPlayer", () => {
     const chain = finalSnap?.chains.find((c) => c.pr === 42);
     expect(chain?.hops).toBeTruthy();
     const hopLabels = chain?.hops?.map((h) => h.label) ?? [];
-    // Original 10 pr-bearing events create hops (e1-e10)
-    const prHopEvents = allEvents.slice(0, 10);
+    // PR-bearing events create hops: e1-e10 + k12 coder_completed (k11 issue_dispatched does not)
+    const prHopEvents = [
+      ...allEvents.slice(0, 10),
+      allEvents[11], // k12 (coder_completed with pr: 42)
+    ].filter((e) => e !== undefined);
     expect(hopLabels).toEqual(prHopEvents.map((e) => e.summary));
-    // Droid state updates pending: reducer binding for coder_completed's idle field not materializing
-    // Task 2 should have landed this, but investigation needed for why last_action remains undefined
+    // Verify issue_dispatched (k11) activated r5 droid before k12 idles it
+    const snapshotWithK11 = snapshots.find((snap) => {
+      const r5 = snap.droids.find((d) => d.droid === "r5");
+      return r5?.task === "dispatching issue #128";
+    });
+    expect(snapshotWithK11).toBeDefined();
+    // Assert final droid state captures last_action from coder_completed via idle field
+    const r5Droid = finalSnap?.droids.find((d) => d.droid === "r5");
+    expect(r5Droid?.last_action).toBe("coder reworked · PR #42");
     vi.useRealTimers();
   });
 });
