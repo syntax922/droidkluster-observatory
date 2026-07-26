@@ -29,4 +29,24 @@ describe("renderStations", () => {
     expect(tt?.textContent).toContain("IDLE");
     expect(tt?.textContent).toContain("APPROVED");
   });
+
+  it("renders r5 card with dispatching task", () => {
+    const el = document.createElement("div");
+    renderStations(
+      el,
+      [
+        {
+          droid: "r5",
+          state: "active",
+          task: "dispatching issue #128",
+          since: "2026-07-25T14:01:30Z",
+        },
+      ],
+      NOW,
+    );
+    const r5 = el.querySelector('[data-droid="r5"]');
+    expect(r5?.textContent).toContain("R5");
+    expect(r5?.textContent).toContain("Dispatch & rework routing");
+    expect(r5?.textContent).toContain("DISPATCHING ISSUE #128");
+  });
 });

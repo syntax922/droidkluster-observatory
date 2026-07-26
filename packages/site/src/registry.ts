@@ -44,9 +44,12 @@ export const DROID_REGISTRY: Record<DroidId, DroidInfo> = {
   },
   r5: {
     name: "R5",
-    role: "Coder dispatcher",
-    model: "Claude Sonnet",
-    doctrine: ["Dispatches issues to coders; orchestrates rework cycles and completions."],
+    role: "Dispatch & rework routing",
+    model: "deterministic + LLM-assisted",
+    doctrine: [
+      "Routes approved issues to the implementing agent and reworks PRs when review requests changes.",
+      "Renders only observed events — coder failures publish nothing, so R5 never claims a state it cannot see.",
+    ],
   },
   copilot: {
     name: "Copilot",
