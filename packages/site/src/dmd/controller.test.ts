@@ -19,7 +19,7 @@ describe("deriveDmdState", () => {
 });
 
 describe("startDmd", () => {
-  it("reduced motion paints once per state change and schedules no frames", () => {
+  it("reduced motion schedules no animation frames", () => {
     const raf = vi.fn();
     const root = document.createElement("div");
     root.innerHTML = '<canvas data-dmd="r5" width="192" height="96"></canvas>';
@@ -35,6 +35,42 @@ describe("startDmd", () => {
     });
     expect(raf).not.toHaveBeenCalled();
     stop();
+  });
+
+  it("reduced motion paints unconditionally on the interval, including a freshly re-rendered canvas whose state-key is unchanged", () => {
+    vi.useFakeTimers();
+    try {
+      const paint = vi.fn();
+      const root = document.createElement("div");
+      root.innerHTML = '<canvas data-dmd="r5" width="192" height="96"></canvas>';
+      const stop = startDmd({
+        root,
+        reducedMotion: true,
+        paint,
+        getBoard: () => ({
+          mode: "live",
+          droids: [{ droid: "r5", state: "idle" }],
+          celebrating: false,
+        }),
+      });
+      // Immediate paint pass at start.
+      expect(paint).toHaveBeenCalledTimes(1);
+
+      // Simulate renderStations() replacing the canvas element wholesale on a
+      // poll — the derived state ("r5:idle") is unchanged, but the DOM node
+      // is a brand-new, blank canvas. A key-diff would (incorrectly) skip it.
+      const freshCanvas = document.createElement("canvas");
+      freshCanvas.dataset.dmd = "r5";
+      root.replaceChildren(freshCanvas);
+
+      vi.advanceTimersByTime(2000);
+      expect(paint).toHaveBeenCalledTimes(2);
+      expect(paint.mock.calls[1]?.[0]).toBe(freshCanvas);
+
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("animated mode schedules frames via the injected raf and stop() halts it", () => {
     let queued: (() => void) | null = null;

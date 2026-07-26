@@ -28,17 +28,21 @@ export interface StartDmdOpts {
   now?: () => number;
   raf?: (cb: () => void) => void;
   reducedMotion?: boolean;
+  // Test-only seam: inject a paint spy without touching the real canvas
+  // painter. Production callers never set this — it defaults to the real
+  // paintFrame — so the public startDmd contract is otherwise unchanged.
+  paint?: typeof paintFrame;
 }
 
 export function startDmd(opts: StartDmdOpts): () => void {
   const now = opts.now ?? (() => performance.now());
   const raf = opts.raf ?? ((cb) => requestAnimationFrame(cb));
+  const paint = opts.paint ?? paintFrame;
   const reduced =
     opts.reducedMotion ??
     (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches);
   let stopped = false;
   let lastPaint = 0;
-  let lastKey = "";
 
   function canvases(): Array<{ el: HTMLCanvasElement; droid: DroidId }> {
     // Array.from (not spread) — NodeListOf isn't Iterable under this
@@ -59,27 +63,22 @@ export function startDmd(opts: StartDmdOpts): () => void {
       };
       const state = deriveDmdState(board.mode, status, board.celebrating);
       parts.push(`${droid}:${state}`);
-      paintFrame(el, dmdFrame(droid, state, t), ACCENTS[droid]);
+      paint(el, dmdFrame(droid, state, t), ACCENTS[droid]);
     }
     return parts.join("|");
   }
 
   if (reduced) {
-    // Static: repaint only when the derived state-set changes, checked on a slow interval.
-    lastKey = paintAll(0);
+    // Static: repaint unconditionally on a slow interval, AND once immediately
+    // at start. A state-key diff here is unsafe: renderStations() replaces
+    // station canvases wholesale on every poll, so a derived-state match
+    // against the OLD canvas would skip painting the fresh (blank) one that
+    // replaced it — the DMD would go permanently blank after any re-render
+    // whose state-key happened to match the prior key.
+    paintAll(0);
     const timer = setInterval(() => {
       if (stopped) return;
-      const board = opts.getBoard();
-      const key = canvases()
-        .map(({ droid }) => {
-          const s = board.droids.find((d) => d.droid === droid) ?? {
-            droid,
-            state: "idle" as const,
-          };
-          return `${droid}:${deriveDmdState(board.mode, s, board.celebrating)}`;
-        })
-        .join("|");
-      if (key !== lastKey) lastKey = paintAll(0);
+      paintAll(0);
     }, 2000);
     return () => {
       stopped = true;
