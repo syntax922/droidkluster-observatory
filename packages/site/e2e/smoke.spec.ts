@@ -14,3 +14,9 @@ test("clicking a station opens its dossier", async ({ page }) => {
   await page.locator('[data-droid="hk-47"]').click();
   await expect(page.locator("#dossier")).toContainText("Code reviewer");
 });
+
+test("dossier renders specification sections with abstraction disclaimer", async ({ page }) => {
+  await page.goto("/");
+  await page.locator('[data-droid="hk-47"]').click();
+  await expect(page.locator("#dossier")).toContainText("abstracted from production");
+});

@@ -131,6 +131,18 @@ body {
 .dossier-role {
   color: var(--dim);
 }
+.spec-tag {
+  color: var(--dim);
+  font-size: 0.7rem;
+  font-style: italic;
+}
+.dossier h3 {
+  margin: 12px 0 4px;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
 @media (max-width: 720px) {
   #board {
     grid-template-columns: 1fr;
