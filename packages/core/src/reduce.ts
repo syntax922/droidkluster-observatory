@@ -234,9 +234,11 @@ function classify(subject: string, payload: unknown): Classified | null {
 export function reduce(
   state: FleetState,
   env: CanonEnvelope,
+  opts?: { ignorePrs?: ReadonlySet<number> },
 ): { state: FleetState; emitted: PublicEvent[] } {
   const c = classify(env.subject, env.payload);
   if (!c) return { state, emitted: [] };
+  if (c.pr !== undefined && opts?.ignorePrs?.has(c.pr)) return { state, emitted: [] };
   const at = env.ts ?? new Date(0).toISOString();
 
   const event: PublicEvent = {

@@ -85,6 +85,7 @@ rather than degrading silently.
 | `OBSERVATORY_PUSH_ENABLED` | `true` | no | no | Kill switch. Defaults to enabled; set to the literal string `false` to halt all edge pushes without stopping NATS ingestion. See [threat model](../THREAT_MODEL.md#the-sanitizer-contract). |
 | `PUSH_DEBOUNCE_MS` | `10000` | no | no | Defaults to `10000`. Coalescing window for on-event pushes to `current.json` / the day's feed. |
 | `PUSH_HEARTBEAT_MS` | `60000` | no | no | Defaults to `60000`. Interval for the `last_contact` heartbeat push even when idle. |
+| `OBSERVATORY_IGNORE_PRS` | `99999` | no | no | Defaults to `99999`, the fleet's synthetic canary PR. Comma-separated list of PR numbers filtered out of public artifacts at the `reduce()` boundary, before any droid-status/chain/feed mutation — a canary PR never flips a droid task, never opens a chain, and never appears in the feed. Throws on a non-integer entry. |
 
 ### The durable-consumer filter-change gotcha
 
