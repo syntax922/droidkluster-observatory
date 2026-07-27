@@ -238,3 +238,7 @@ body {
     grid-column: 1;
   }
 }
+
+#honesty {
+  min-height: 1.2em; /* reserve the strip before first telemetry paint — no layout shift */
+}

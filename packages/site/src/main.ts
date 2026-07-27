@@ -130,6 +130,10 @@ const replay = createReplayController({
   },
 });
 
+// Deploy stamp: inspectable in devtools, and guarantees each deploy re-hashes
+// the bundle past any edge-cached artifact of the previous one.
+document.documentElement.dataset.build = "2026-07-27";
+
 startDmd({ root: els.stations, getBoard: () => lastBoard });
 
 startPolling({
