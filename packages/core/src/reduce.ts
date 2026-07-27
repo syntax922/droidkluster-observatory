@@ -57,6 +57,7 @@ interface Classified {
   activate?: { droid: DroidId; task: string };
   idle?: { droid: DroidId; last_action: string };
   complete?: boolean;
+  reopen?: boolean;
 }
 
 function classify(subject: string, payload: unknown): Classified | null {
@@ -159,6 +160,18 @@ function classify(subject: string, payload: unknown): Classified | null {
           complete: true,
         };
       }
+      case "reopened":
+        // A reopen returns the story to the opened stage (journey-stage
+        // correct) — reuse the pr_opened kind rather than adding a new
+        // PublicEventKind, and flag `reopen` so reduce() reactivates the
+        // chain (clears `complete`) instead of leaving it stuck closed.
+        return {
+          kind: "pr_opened",
+          droid: "system",
+          pr,
+          summary: `PR #${pr} reopened`,
+          reopen: true,
+        };
       default:
         return null;
     }
@@ -273,6 +286,10 @@ export function reduce(
     if (chain.events.length > CHAIN_EVENTS_MAX) chain.events.shift();
     chain.updated_at = at;
     if (c.complete) chain.complete = true;
+    // A reopen reactivates a closed chain: the roach motel (chains check in
+    // but never check out) is exactly the bug class this guards against —
+    // this is the only place `complete` is ever cleared.
+    if (c.reopen) chain.complete = false;
   }
 
   state.feed.push(event);
