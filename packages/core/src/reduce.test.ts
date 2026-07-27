@@ -120,6 +120,69 @@ describe("reduce", () => {
     expect(state.chains.get(1700)?.complete).toBe(true);
   });
 
+  it("pr.reopened classifies as pr_opened, tagged reopen, from system", () => {
+    let s = reduce(emptyFleetState(), prOpened).state;
+    s = reduce(
+      s,
+      env("gh.event.project.pr.closed.1700", {
+        action: "closed",
+        pull_request: { number: 1700, merged: false, head: { sha: "abc" } },
+        repository: { full_name: "x/d" },
+      }),
+    ).state;
+    expect(s.chains.get(1700)?.complete).toBe(true);
+    const { state, emitted } = reduce(
+      s,
+      env("gh.event.project.pr.reopened.1700", {
+        action: "reopened",
+        pull_request: { number: 1700, head: { sha: "abc" } },
+        repository: { full_name: "x/d" },
+      }),
+    );
+    expect(emitted[0]).toMatchObject({ kind: "pr_opened", droid: "system", pr: 1700 });
+    expect(emitted[0]?.summary).toBe("PR #1700 reopened");
+    expect(state.chains.get(1700)?.hops.at(-1)).toMatchObject({
+      kind: "pr_opened",
+      label: "PR #1700 reopened",
+    });
+  });
+
+  it("pr.reopened on a completed chain reactivates it (clears complete)", () => {
+    let s = reduce(emptyFleetState(), prOpened).state;
+    s = reduce(
+      s,
+      env("gh.event.project.pr.closed.1700", {
+        action: "closed",
+        pull_request: { number: 1700, merged: false, head: { sha: "abc" } },
+        repository: { full_name: "x/d" },
+      }),
+    ).state;
+    expect(s.chains.get(1700)?.complete).toBe(true);
+    const { state } = reduce(
+      s,
+      env("gh.event.project.pr.reopened.1700", {
+        action: "reopened",
+        pull_request: { number: 1700, head: { sha: "abc" } },
+        repository: { full_name: "x/d" },
+      }),
+    );
+    expect(state.chains.get(1700)?.complete).toBe(false);
+  });
+
+  it("pr.reopened on a chain that was never closed leaves complete=false (no-op, not a crash)", () => {
+    const s = reduce(emptyFleetState(), prOpened).state;
+    expect(s.chains.get(1700)?.complete).toBe(false);
+    const { state } = reduce(
+      s,
+      env("gh.event.project.pr.reopened.1700", {
+        action: "reopened",
+        pull_request: { number: 1700, head: { sha: "abc" } },
+        repository: { full_name: "x/d" },
+      }),
+    );
+    expect(state.chains.get(1700)?.complete).toBe(false);
+  });
+
   it("unknown subjects are ignored without throwing", () => {
     const { emitted } = reduce(
       emptyFleetState(),
