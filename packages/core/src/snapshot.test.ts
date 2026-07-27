@@ -56,6 +56,53 @@ describe("toSnapshot", () => {
     expect((snap.chains[0] as Record<string, unknown>).events).toBeUndefined();
   });
 
+  it("a completed chain that receives a reopen becomes active again", () => {
+    let s = emptyFleetState();
+    s = reduce(s, {
+      kind: "event",
+      id: "a",
+      subject: "gh.event.project.pr.opened.7",
+      ts: T0,
+      payload: {
+        action: "opened",
+        pull_request: { number: 7, head: { sha: "x" } },
+        repository: { full_name: "x/d" },
+      },
+    }).state;
+    s = reduce(s, {
+      kind: "event",
+      id: "b",
+      subject: "gh.event.project.pr.closed.7",
+      ts: "2026-07-25T14:01:00Z",
+      payload: {
+        action: "closed",
+        pull_request: { number: 7, merged: false, head: { sha: "x" } },
+        repository: { full_name: "x/d" },
+      },
+    }).state;
+    // Confirm the chain is complete and inactive before the reopen.
+    const closedSnap = toSnapshot(s, new Date("2026-07-25T14:02:00Z"));
+    const closedChain = closedSnap.chains.find((c) => c.pr === 7);
+    expect(closedChain?.complete).toBe(true);
+    expect(closedChain?.active).toBe(false);
+
+    s = reduce(s, {
+      kind: "event",
+      id: "c",
+      subject: "gh.event.project.pr.reopened.7",
+      ts: "2026-07-25T14:03:00Z",
+      payload: {
+        action: "reopened",
+        pull_request: { number: 7, head: { sha: "x" } },
+        repository: { full_name: "x/d" },
+      },
+    }).state;
+    const reopenedSnap = toSnapshot(s, new Date("2026-07-25T14:04:00Z"));
+    const reopenedChain = reopenedSnap.chains.find((c) => c.pr === 7);
+    expect(reopenedChain?.complete).toBe(false);
+    expect(reopenedChain?.active).toBe(true);
+  });
+
   it("carries last_action_at through from the reducer's idle transition", () => {
     let s = stateWithActiveReview();
     s = reduce(s, {

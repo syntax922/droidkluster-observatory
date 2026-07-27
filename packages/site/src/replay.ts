@@ -194,7 +194,12 @@ export class ReplayPlayer {
 function syntheticSubject(e: PublicEvent): string {
   switch (e.kind) {
     case "pr_opened":
-      return `gh.event.project.pr.opened.${e.pr}`;
+      // pr_opened is reused for the reopen variant (see reduce.ts's
+      // classify()) — sniff the summary the same way syntheticPayload does,
+      // since PublicEvent carries no separate `reopen` flag on the wire.
+      return e.summary.endsWith("reopened")
+        ? `gh.event.project.pr.reopened.${e.pr}`
+        : `gh.event.project.pr.opened.${e.pr}`;
     case "review_requested":
       return `gh.event.project.pr.review_requested.${e.pr}`;
     case "review_started":
@@ -224,7 +229,13 @@ function syntheticPayload(e: PublicEvent): Record<string, unknown> {
   const pr = e.pr ?? 0;
   switch (e.kind) {
     case "pr_opened":
-      return { action: "opened", pull_request: { number: pr } };
+      return e.summary.endsWith("reopened")
+        ? {
+            action: "reopened",
+            pull_request: { number: pr },
+            repository: { full_name: "replay/replay" },
+          }
+        : { action: "opened", pull_request: { number: pr } };
     case "review_requested":
       return { action: "review_requested", pull_request: { number: pr } };
     case "review_started":
