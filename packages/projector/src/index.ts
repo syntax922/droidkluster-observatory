@@ -99,7 +99,7 @@ export async function main(): Promise<void> {
           ...(typeof envObj.ts === "string" ? { ts: envObj.ts } : {}),
           payload: envObj.payload,
         };
-        const { emitted } = reduce(state, env);
+        const { emitted } = reduce(state, env, { ignorePrs: cfg.ignorePrs });
         if (emitted.length > 0) {
           const day = new Date().toISOString().slice(0, 10);
           const dayFeed = feedByDay.get(day) ?? [];
