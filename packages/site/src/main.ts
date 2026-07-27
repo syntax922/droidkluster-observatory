@@ -1,18 +1,89 @@
-import type { CurrentSnapshot, DroidId, PublicEvent } from "@observatory/core";
+import type { Chain, CurrentSnapshot, DroidId, PublicEvent } from "@observatory/core";
 import { DroidIdSchema } from "@observatory/core";
 import { createCelebrationTracker } from "./celebrate.js";
 import { fetchReplayBundle, fetchReplayIndex, startPolling } from "./data.js";
 import type { BoardView } from "./dmd/controller.js";
 import { startDmd } from "./dmd/controller.js";
+import type { LaneState } from "./journey-controller.js";
+import { startJourneys } from "./journey-controller.js";
+import { STAGES, type Stage, chainStage, stageOf } from "./journey.js";
 import { renderChains } from "./render/chains.js";
 import { renderDossier } from "./render/dossier.js";
 import { renderHonesty } from "./render/honesty.js";
+import { type JourneyLane, renderJourneys } from "./render/journeys.js";
 import { renderStations } from "./render/stations.js";
-import { renderTicker } from "./render/ticker.js";
 import { createReplayController } from "./replay-controller.js";
 import { ReplayPlayer } from "./replay.js";
 import { decideMode } from "./shell.js";
 import "./style.css";
+
+// Caps how many chains get their own lane on the live journey map — more
+// than a handful of simultaneous lanes stops being a spatial "where is it"
+// view and turns back into a scrolling list, which is the exact problem
+// this replaces the ticker to solve.
+const LIVE_LANE_CAP = 4;
+
+function visitedStages(hopKinds: Iterable<PublicEvent["kind"]>): boolean[] {
+  const visited = STAGES.map(() => false);
+  for (const kind of hopKinds) {
+    const stage = stageOf(kind);
+    if (stage) visited[STAGES.indexOf(stage)] = true;
+  }
+  return visited;
+}
+
+// Builds both the DOM-facing lanes (render/journeys.ts) and the
+// controller-facing lane states (journey-controller.ts) from the same
+// ordered chain list, sharing a `pr-${pr}` key between the two so the
+// controller's canvas lookup lines up with what renderJourneys just drew.
+function buildLiveLanes(chains: Chain[]): { lanes: JourneyLane[]; states: LaneState[] } {
+  const ordered = [...chains].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const lanes: JourneyLane[] = [];
+  const states: LaneState[] = [];
+  for (const c of ordered.slice(0, LIVE_LANE_CAP)) {
+    const { stage, droid } = chainStage(c);
+    const key = `pr-${c.pr}`;
+    const latest = c.hops[c.hops.length - 1]?.label ?? "opened";
+    lanes.push({ pr: c.pr, latest, droid, canvasKey: key });
+    states.push({
+      key,
+      stageIndex: STAGES.indexOf(stage),
+      visited: visitedStages(c.hops.map((h) => h.kind)),
+      droid,
+    });
+  }
+  return { lanes, states };
+}
+
+// Replay's onFrame only carries the flat feed of PublicEvents seen so far
+// (not a Chain), so this mirrors chainStage()'s "last hop with a non-null
+// stage wins" rule directly over that feed instead.
+function buildReplayLane(feed: PublicEvent[]): { lane: JourneyLane; state: LaneState } {
+  const lastEvent = feed[feed.length - 1];
+  const pr = lastEvent?.pr ?? 0;
+  const key = `replay-${pr}`;
+  let stage: Stage = "opened";
+  let droid: DroidId | "system" = "system";
+  for (let i = feed.length - 1; i >= 0; i--) {
+    const e = feed[i];
+    const s = e ? stageOf(e.kind) : null;
+    if (e && s) {
+      stage = s;
+      droid = e.droid;
+      break;
+    }
+  }
+  const latest = lastEvent?.summary ?? "opened";
+  return {
+    lane: { pr, latest, droid, canvasKey: key },
+    state: {
+      key,
+      stageIndex: STAGES.indexOf(stage),
+      visited: visitedStages(feed.map((e) => e.kind)),
+      droid,
+    },
+  };
+}
 
 const DATA_BASE = import.meta.env.VITE_DATA_BASE ?? "https://data.whatis.droidkluster.com";
 const POLL_MS = 20_000;
@@ -21,7 +92,7 @@ const els = {
   honesty: document.querySelector("#honesty") as HTMLElement,
   stations: document.querySelector("#stations") as HTMLElement,
   chains: document.querySelector("#chains") as HTMLElement,
-  ticker: document.querySelector("#ticker") as HTMLElement,
+  journeys: document.querySelector("#journeys") as HTMLElement,
   dossier: document.querySelector("#dossier") as HTMLElement,
 };
 
@@ -34,8 +105,13 @@ let lastKnownContact = new Date(0).toISOString();
 // sync with whatever's on screen, even though it paints on its own clock.
 let lastBoard: BoardView = { mode: "idle", droids: [], celebrating: false };
 
-// excerptsByPr for the LIVE feed, rebuilt each time the ticker's feed fetch
-// resolves (see refreshTickerFromFeed). Keyed by PR, then by `${kind}|${at}`
+// Tracks the latest per-chain journey state for the journey controller's
+// pull-based getLanes(). Updated in the same render paths that update
+// lastBoard, so the traveling dots stay in sync with whatever's on screen.
+let laneState: LaneState[] = [];
+
+// excerptsByPr for the LIVE feed, rebuilt each time the day's feed fetch
+// resolves (see refreshExcerptsFromFeed). Keyed by PR, then by `${kind}|${at}`
 // so the story rail can look up the excerpt for a specific hop.
 let liveExcerptsByPr = new Map<number, Map<string, string>>();
 
@@ -44,7 +120,7 @@ function liveExcerptsFor(pr: number): Map<string, string> {
 }
 
 // Builds the `${kind}|${at}` -> excerpt lookup renderChains expects, scoped
-// to a single feed of events (live ticker feed, or a replay's accumulated
+// to a single feed of events (the live day-feed, or a replay's accumulated
 // feed — each call site owns its own map so replay excerpts never leak into
 // the live view or vice versa).
 function buildExcerptsByPr(events: PublicEvent[]): Map<number, Map<string, string>> {
@@ -80,23 +156,25 @@ function renderLive(snap: CurrentSnapshot): void {
   const now = Date.now();
   renderStations(els.stations, snap.droids, now);
   renderChains(els.chains, snap.chains, liveExcerptsFor);
+  const { lanes, states } = buildLiveLanes(snap.chains);
+  renderJourneys(els.journeys, lanes);
+  laneState = states;
   renderHonesty(els.honesty, { mode: "live", lastContact: snap.last_contact, nowMs: now });
   lastBoard = { mode: "live", droids: snap.droids, celebrating: celebration.observe(snap.chains) };
 }
 
-async function refreshTickerFromFeed(): Promise<void> {
+async function refreshExcerptsFromFeed(): Promise<void> {
   const day = new Date().toISOString().slice(0, 10);
   try {
     const res = await fetch(`${DATA_BASE}/feed/${day}.json`, { cache: "no-cache" });
     if (res.ok) {
       const body = (await res.json()) as { events?: PublicEvent[] };
       if (Array.isArray(body.events)) {
-        renderTicker(els.ticker, body.events);
         liveExcerptsByPr = buildExcerptsByPr(body.events);
       }
     }
   } catch {
-    /* keep last ticker */
+    /* keep last known excerpts */
   }
 }
 
@@ -109,7 +187,9 @@ const replay = createReplayController({
     const replayExcerptsByPr = buildExcerptsByPr(feed);
     renderStations(els.stations, snap.droids, replayNow);
     renderChains(els.chains, snap.chains, (pr) => replayExcerptsByPr.get(pr) ?? new Map());
-    renderTicker(els.ticker, feed);
+    const { lane, state } = buildReplayLane(feed);
+    renderJourneys(els.journeys, [lane]);
+    laneState = [state];
     renderHonesty(els.honesty, {
       mode: "replay",
       lastContact: lastKnownContact,
@@ -135,6 +215,7 @@ const replay = createReplayController({
 document.documentElement.dataset.build = "2026-07-27";
 
 startDmd({ root: els.stations, getBoard: () => lastBoard });
+startJourneys({ root: els.journeys, getLanes: () => laneState });
 
 startPolling({
   base: DATA_BASE,
@@ -147,7 +228,7 @@ startPolling({
       // painting, so a newly-arrived excerpt-bearing hop renders its quote
       // card on this snapshot instead of waiting for the next ~20s poll.
       // The catch keeps a feed failure from blocking the board render.
-      await refreshTickerFromFeed().catch(() => {});
+      await refreshExcerptsFromFeed().catch(() => {});
       renderLive(snap);
     } else if (mode === "stale") {
       replay.exit();
