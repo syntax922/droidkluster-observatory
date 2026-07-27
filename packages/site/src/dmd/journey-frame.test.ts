@@ -40,4 +40,33 @@ describe("journeyFrame", () => {
     const f = journeyFrame(0, NONE, [], 0);
     expect(f.length).toBe(JOURNEY_W * JOURNEY_H);
   });
+
+  describe("dimmed (stale/idle honesty idiom)", () => {
+    it("is static: identical output at different tMs (no pulse animation)", () => {
+      const a = journeyFrame(3, [true, false, false, false, false, false], [], 0, true);
+      const b = journeyFrame(3, [true, false, false, false, false, false], [], 500, true);
+      expect(Array.from(a)).toEqual(Array.from(b));
+    });
+
+    it("renders the dot at intensity 2, not 3", () => {
+      const f = journeyFrame(0, NONE, [], 0, true);
+      expect(f[ROW_Y * JOURNEY_W + 12]).toBe(2);
+    });
+
+    it("collapses the visited/unvisited station distinction to a flat intensity-1 dot", () => {
+      const visited = journeyFrame(3, [true, false, false, false, false, false], [], 500, true);
+      const unvisited = journeyFrame(3, NONE, [], 500, true);
+      // Station 0's diamond-outline points (above/below the row) are absent
+      // when dimmed, even though it's visited — unlike the non-dimmed case.
+      expect(visited[(ROW_Y - 1) * JOURNEY_W + 12]).toBe(0);
+      expect(visited[ROW_Y * JOURNEY_W + 12]).toBe(1);
+      expect(Array.from(visited)).toEqual(Array.from(unvisited));
+    });
+
+    it("defaults to non-dimmed when the parameter is omitted", () => {
+      const withDefault = journeyFrame(0, NONE, [], 0);
+      const explicitFalse = journeyFrame(0, NONE, [], 0, false);
+      expect(Array.from(withDefault)).toEqual(Array.from(explicitFalse));
+    });
+  });
 });
