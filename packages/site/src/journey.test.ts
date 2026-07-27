@@ -58,6 +58,19 @@ describe("chainStage", () => {
   it("falls back to opened/system for a chain with no staged hop", () => {
     expect(chainStage(chain([]))).toEqual({ stage: "opened", droid: "system" });
   });
+
+  it("a reopened chain's journey dot returns to OPENED (reopen rides pr_opened's stage for free)", () => {
+    // HSC#173: reopen is classified as kind "pr_opened" (see reduce.ts), so
+    // it inherits pr_opened's "opened" stage via STAGE_BY_KIND with no
+    // change needed here — this test pins that inheritance.
+    const c = chain([
+      { at: "t0", droid: "system", kind: "pr_opened", label: "PR #42 opened" },
+      { at: "t1", droid: "hk-47", kind: "review_started", label: "review started" },
+      { at: "t2", droid: "system", kind: "pr_merged", label: "PR #42 merged" },
+      { at: "t3", droid: "system", kind: "pr_opened", label: "PR #42 reopened" },
+    ]);
+    expect(chainStage(c)).toEqual({ stage: "opened", droid: "system" });
+  });
 });
 
 describe("createTween", () => {

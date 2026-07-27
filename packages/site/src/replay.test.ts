@@ -342,6 +342,22 @@ describe("ReplayPlayer", () => {
         issue: 128,
         summary: "PR #130 opened from issue #128",
       },
+      {
+        id: "k14",
+        at: "2026-07-25T00:13:00Z",
+        droid: "system",
+        kind: "pr_closed",
+        pr: 42,
+        summary: "PR #42 closed",
+      },
+      {
+        id: "k15",
+        at: "2026-07-25T00:14:00Z",
+        droid: "system",
+        kind: "pr_opened",
+        pr: 42,
+        summary: "PR #42 reopened",
+      },
     ];
 
     const testBundle = {
@@ -394,6 +410,17 @@ describe("ReplayPlayer", () => {
     // Note: last_action uses "coder {status} · {ref}" format, not the "opened from issue" summary
     const r5Droid = finalSnap?.droids.find((d) => d.droid === "r5");
     expect(r5Droid?.last_action).toBe("coder opened · PR #130");
+    // Reopen round-trip (HSC#173): a pr_closed followed by a reopened event
+    // on the SAME PR is the exact "roach motel" gap this PR fixes — chain
+    // hits the closed dead end, then must be able to check back out. Runs
+    // the reopen variant through the full PublicEvent -> syntheticSubject ->
+    // reduce() round trip and asserts BOTH the hop label and reactivation.
+    vi.runAllTimers();
+    expect(snapshots).toHaveLength(15);
+    const finalSnap2 = snapshots[snapshots.length - 1];
+    const chain42 = finalSnap2?.chains.find((c) => c.pr === 42);
+    expect(chain42?.hops.at(-1)?.label).toBe("PR #42 reopened");
+    expect(chain42?.complete).toBe(false);
     vi.useRealTimers();
   });
 
