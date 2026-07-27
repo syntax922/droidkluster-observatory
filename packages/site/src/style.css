@@ -157,16 +157,54 @@ body {
   }
 }
 
-.tick {
-  padding: 2px 0;
-  font-size: 0.8rem;
-}
-.tick-excerpt {
-  color: var(--dim);
-  padding-left: 2ch;
-  font-style: italic;
-}
 .chains-empty {
+  color: var(--dim);
+}
+
+/* Pipeline journey map: one .lane per chain, a station-row canvas per lane,
+   a single .lane-legend under the last lane (see renderJourneys). */
+.lane {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.lane:last-of-type {
+  border-bottom: none;
+}
+.lane-head {
+  font-size: 0.75rem;
+  color: var(--dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lane-map {
+  display: block;
+  width: 100%;
+  height: 24px;
+  image-rendering: pixelated;
+  background: #05070b;
+  border-radius: 3px;
+  margin-top: 4px;
+}
+.lane-legend {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  padding: 3px 0 6px;
+  font-size: 0.6rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--dim);
+}
+.lane-legend span:first-child {
+  text-align: left;
+}
+.lane-legend span:last-child {
+  text-align: right;
+}
+.lane-legend span:not(:first-child):not(:last-child) {
+  text-align: center;
+}
+.journeys-empty {
   color: var(--dim);
 }
 #honesty {
@@ -193,7 +231,7 @@ body {
 #chains {
   overflow-y: auto;
 }
-#ticker {
+#journeys {
   grid-column: 2;
   overflow-y: auto;
   border-top: 1px solid var(--line);
@@ -234,7 +272,7 @@ body {
     flex-direction: row;
     overflow-x: auto;
   }
-  #ticker {
+  #journeys {
     grid-column: 1;
   }
 }

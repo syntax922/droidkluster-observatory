@@ -8,6 +8,7 @@ test("board renders stations, chain, honesty strip from fixture data", async ({ 
   await expect(page.locator("#chains .chain").first()).toBeVisible();
   await expect(page.locator("#chains .tl-node").first()).toBeVisible();
   await expect(page.locator('canvas[data-dmd="hk-47"]')).toBeVisible();
+  await expect(page.locator("#journeys .lane-map").first()).toBeVisible();
 });
 
 test("clicking a station opens its dossier", async ({ page }) => {
