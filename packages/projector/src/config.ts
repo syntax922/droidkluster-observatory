@@ -9,6 +9,7 @@ export interface ProjectorConfig {
   pushEnabled: boolean;
   debounceMs: number;
   heartbeatMs: number;
+  ignorePrs: ReadonlySet<number>;
 }
 
 function req(env: Record<string, string | undefined>, name: string): string {
@@ -30,6 +31,34 @@ function numEnv(env: Record<string, string | undefined>, name: string, fallback:
   const n = Number(raw);
   if (Number.isNaN(n) || n < 0) throw new Error(`invalid numeric value for ${name}`);
   return n;
+}
+
+/**
+ * CSV-of-ints env var, e.g. `OBSERVATORY_IGNORE_PRS`. Used to filter the
+ * fleet's synthetic canary PR(s) — and any other pipeline-internal PR
+ * numbers — out of public artifacts at the reduce() boundary. Falls back to
+ * the single known canary (#99999) when unset; throws on any non-integer
+ * entry so a typo'd override fails loudly rather than silently admitting
+ * the canary.
+ */
+function intSetEnv(
+  env: Record<string, string | undefined>,
+  name: string,
+  fallback: readonly number[],
+): ReadonlySet<number> {
+  const raw = env[name];
+  if (raw === undefined) return new Set(fallback);
+  const entries = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const out = new Set<number>();
+  for (const entry of entries) {
+    const n = Number(entry);
+    if (!Number.isInteger(n)) throw new Error(`invalid integer value for ${name}: ${entry}`);
+    out.add(n);
+  }
+  return out;
 }
 
 /**
@@ -59,5 +88,6 @@ export function readConfig(env: Record<string, string | undefined>): ProjectorCo
     pushEnabled: env.OBSERVATORY_PUSH_ENABLED !== "false",
     debounceMs: numEnv(env, "PUSH_DEBOUNCE_MS", 10000),
     heartbeatMs: numEnv(env, "PUSH_HEARTBEAT_MS", 60000),
+    ignorePrs: intSetEnv(env, "OBSERVATORY_IGNORE_PRS", [99999]),
   };
 }

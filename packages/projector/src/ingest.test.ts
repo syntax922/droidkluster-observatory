@@ -75,6 +75,24 @@ describe("ingest", () => {
     expect(readdirSync(dir).filter((f) => f.endsWith(".json"))).toEqual([]);
   });
 
+  it("drops the fleet's canary PR (99999) by default", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ingest-"));
+    const input = join(dir, "rec.jsonl");
+    const canaryLines = lines.map((l) => ({
+      ...l,
+      id: `canary-${l.id}`,
+      subject: l.subject.replace(".42", ".99999"),
+      payload: {
+        ...l.payload,
+        pull_request: { ...l.payload.pull_request, number: 99999 },
+      },
+    }));
+    writeFileSync(input, [...lines, ...canaryLines].map((l) => JSON.stringify(l)).join("\n"));
+    const written = ingest(input, dir);
+    expect(written).toEqual(["pr-42-2026-07-25.json"]);
+    expect(written.some((f) => f.includes("99999"))).toBe(false);
+  });
+
   it("creates output directory if it does not exist", () => {
     const tempBase = mkdtempSync(join(tmpdir(), "ingest-"));
     const outDir = join(tempBase, "nonexistent", "subdir");

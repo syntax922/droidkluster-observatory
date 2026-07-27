@@ -9,7 +9,17 @@ import { type CanonEnvelope, ReplayBundleSchema, emptyFleetState, reduce } from 
 
 const MIN_EVENTS = 3;
 
-export function ingest(inputPath: string, outDir: string): string[] {
+// Same default as the live projector's OBSERVATORY_IGNORE_PRS (config.ts) —
+// keeps the fleet's synthetic canary PR out of future inaugural replay
+// bundles even when ingest.js is run standalone without that env var.
+const DEFAULT_IGNORE_PRS: ReadonlySet<number> = new Set([99999]);
+
+export function ingest(
+  inputPath: string,
+  outDir: string,
+  opts?: { ignorePrs?: ReadonlySet<number> },
+): string[] {
+  const ignorePrs = opts?.ignorePrs ?? DEFAULT_IGNORE_PRS;
   const state = emptyFleetState();
   for (const line of readFileSync(inputPath, "utf8").split("\n")) {
     if (!line.trim()) continue;
@@ -17,13 +27,17 @@ export function ingest(inputPath: string, outDir: string): string[] {
       const raw = JSON.parse(line) as Partial<CanonEnvelope>;
       if (raw.kind !== "event" || typeof raw.subject !== "string" || typeof raw.id !== "string")
         continue;
-      reduce(state, {
-        kind: "event",
-        id: raw.id,
-        subject: raw.subject,
-        ...(typeof raw.ts === "string" ? { ts: raw.ts } : {}),
-        payload: raw.payload,
-      });
+      reduce(
+        state,
+        {
+          kind: "event",
+          id: raw.id,
+          subject: raw.subject,
+          ...(typeof raw.ts === "string" ? { ts: raw.ts } : {}),
+          payload: raw.payload,
+        },
+        { ignorePrs },
+      );
     } catch {
       // Malformed recorder line: skip; the recording is best-effort.
     }
