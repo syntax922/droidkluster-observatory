@@ -32,10 +32,57 @@ const MERGE_DWELL_MS = 3000;
 const MAX_PLAYBACK_MS = 180_000;
 const MIN_DWELL_MS = 700;
 
+// Mirrors chains.ts's static-timeline batching threshold: a run of this
+// many-or-more consecutive system check_run events is CI noise, not a
+// narrative beat, at the pacing layer too.
+const BATCH_MIN_RUN = 3;
+
 function baseDwellFor(event: PublicEvent): number {
   if (event.excerpt) return EXCERPT_DWELL_MS;
   if (event.kind === "pr_merged" || event.kind === "pr_closed") return MERGE_DWELL_MS;
   return BASE_DWELL_MS;
+}
+
+function isBatchableCheckRun(event: PublicEvent): boolean {
+  return event.droid === "system" && event.kind === "check_run";
+}
+
+// A single event, or a run of >= BATCH_MIN_RUN consecutive batchable
+// check_run events collapsed into one display beat. Every underlying event
+// still gets reduced (state/feed fidelity is untouched) — only how many
+// onFrame calls and how much dwell the run consumes changes.
+interface Beat {
+  events: PublicEvent[];
+  rawDwell: number;
+}
+
+// Same run-detection as chains.ts's groupHopUnits, but over PublicEvents
+// (the pacing layer sees the bundle's raw events, not chain hops) and
+// producing a dwell alongside each beat: a batch spends exactly one base
+// dwell in total, not one per underlying event.
+function buildBeats(events: PublicEvent[]): Beat[] {
+  const beats: Beat[] = [];
+  let i = 0;
+  while (i < events.length) {
+    const event = events[i];
+    if (event && isBatchableCheckRun(event)) {
+      let j = i + 1;
+      while (j < events.length) {
+        const next = events[j];
+        if (!next || !isBatchableCheckRun(next)) break;
+        j++;
+      }
+      const run = events.slice(i, j);
+      if (run.length >= BATCH_MIN_RUN) {
+        beats.push({ events: run, rawDwell: BASE_DWELL_MS });
+        i = j;
+        continue;
+      }
+    }
+    if (event) beats.push({ events: [event], rawDwell: baseDwellFor(event) });
+    i++;
+  }
+  return beats;
 }
 
 // Scales dwells down so a long bundle still finishes inside MAX_PLAYBACK_MS,
@@ -43,24 +90,29 @@ function baseDwellFor(event: PublicEvent): number {
 // wall of review prose flashed for 700ms would be worse than a replay that
 // runs a little long. Non-excerpt dwells absorb the whole cut, floored at
 // MIN_DWELL_MS so even a very long bundle keeps individual beats legible.
-function scheduleDwells(events: PublicEvent[]): number[] {
-  const raw = events.map(baseDwellFor);
+// Operates on beats rather than raw events so a batch's single dwell scales
+// (or floors) exactly like any other non-excerpt beat.
+function scheduleDwells(beats: Beat[]): number[] {
+  const raw = beats.map((b) => b.rawDwell);
   const total = raw.reduce((sum, d) => sum + d, 0);
   if (total <= MAX_PLAYBACK_MS) return raw;
 
+  const hasExcerpt = (b: Beat): boolean =>
+    b.events.length === 1 && (b.events[0] as PublicEvent).excerpt !== undefined;
+
   let excerptSum = 0;
   let nonExcerptSum = 0;
-  events.forEach((e, i) => {
+  beats.forEach((b, i) => {
     const dwell = raw[i] as number;
-    if (e.excerpt) excerptSum += dwell;
+    if (hasExcerpt(b)) excerptSum += dwell;
     else nonExcerptSum += dwell;
   });
   const budget = Math.max(0, MAX_PLAYBACK_MS - excerptSum);
   const scale = nonExcerptSum > 0 ? budget / nonExcerptSum : 1;
 
-  return events.map((e, i) => {
+  return beats.map((b, i) => {
     const dwell = raw[i] as number;
-    return e.excerpt ? dwell : Math.max(MIN_DWELL_MS, Math.round(dwell * scale));
+    return hasExcerpt(b) ? dwell : Math.max(MIN_DWELL_MS, Math.round(dwell * scale));
   });
 }
 
@@ -81,24 +133,32 @@ export class ReplayPlayer {
     const state = emptyFleetState();
     const feed: PublicEvent[] = [];
     const label = replayLabel(this.bundle);
-    const dwells = scheduleDwells(this.bundle.events);
-    const events = this.bundle.events;
+    const beats = buildBeats(this.bundle.events);
+    const dwells = scheduleDwells(beats);
 
     const fire = (i: number): void => {
       if (this.stopped) return;
-      const event = events[i];
-      if (!event) return;
-      reduce(state, {
-        kind: "event",
-        id: `replay-${event.id}`,
-        subject: syntheticSubject(event),
-        ts: event.at,
-        payload: syntheticPayload(event),
-      });
-      feed.push(event);
-      this.opts.onFrame(toSnapshot(state, new Date(event.at)), feed, label);
+      const beat = beats[i];
+      if (!beat) return;
+      let lastEvent: PublicEvent | undefined;
+      // Every underlying event in the beat runs through the reducer and
+      // joins the feed — a batch changes how many times onFrame paints, not
+      // what state/feed accumulate. Only the final event's frame is shown.
+      for (const event of beat.events) {
+        reduce(state, {
+          kind: "event",
+          id: `replay-${event.id}`,
+          subject: syntheticSubject(event),
+          ts: event.at,
+          payload: syntheticPayload(event),
+        });
+        feed.push(event);
+        lastEvent = event;
+      }
+      if (!lastEvent) return;
+      this.opts.onFrame(toSnapshot(state, new Date(lastEvent.at)), feed, label);
       if (this.stopped) return; // onFrame may call stop() synchronously mid-loop
-      if (i === events.length - 1) {
+      if (i === beats.length - 1) {
         this.opts.onDone();
         return;
       }
