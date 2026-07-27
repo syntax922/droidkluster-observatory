@@ -221,6 +221,49 @@ describe("reduce", () => {
   });
 });
 
+describe("canary-PR filter (opts.ignorePrs)", () => {
+  it("ignored PR emits nothing and mutates nothing", () => {
+    const before = emptyFleetState();
+    const { state, emitted } = reduce(before, prOpened, { ignorePrs: new Set([1700]) });
+    expect(emitted).toHaveLength(0);
+    expect(state.chains.size).toBe(0);
+    expect(state.feed).toHaveLength(0);
+    expect(state.droids["hk-47"]).toEqual({});
+  });
+
+  it("non-ignored PRs are unaffected when opts is present", () => {
+    const other = env("gh.event.dungeonadventures.pr.opened.42", {
+      action: "opened",
+      pull_request: { number: 42, head: { sha: "abc" } },
+      repository: { full_name: "x/dungeonadventures" },
+    });
+    const { state, emitted } = reduce(emptyFleetState(), other, { ignorePrs: new Set([1700]) });
+    expect(emitted).toHaveLength(1);
+    expect(state.chains.get(42)).toBeDefined();
+  });
+
+  it("canary review_started does NOT set hk-47 task", () => {
+    let s = reduce(emptyFleetState(), prOpened, { ignorePrs: new Set([1700]) }).state;
+    s = reduce(
+      s,
+      env("gh.event.dungeonadventures.pr.review_started.1700", {
+        action: "review_started",
+        pull_request: { number: 1700 },
+        repository: { full_name: "x/d" },
+      }),
+      { ignorePrs: new Set([1700]) },
+    ).state;
+    expect(s.droids["hk-47"].task).toBeUndefined();
+    expect(s.droids["hk-47"].since).toBeUndefined();
+  });
+
+  it("calling without opts leaves existing callers unaffected (site replay stays opts-free)", () => {
+    const { state, emitted } = reduce(emptyFleetState(), prOpened);
+    expect(emitted).toHaveLength(1);
+    expect(state.chains.get(1700)).toBeDefined();
+  });
+});
+
 describe("R5 events", () => {
   it("issue.dispatched activates r5, emits issue-only event, creates no chain", () => {
     const { state, emitted } = reduce(emptyFleetState(), {

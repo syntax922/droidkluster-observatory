@@ -20,6 +20,19 @@ describe("readConfig", () => {
     expect(cfg.filterSubjects).toHaveLength(2);
     expect(cfg.pushEnabled).toBe(true); // default on
   });
+  it("OBSERVATORY_IGNORE_PRS defaults to the fleet canary (99999)", () => {
+    const cfg = readConfig(base);
+    expect(cfg.ignorePrs).toEqual(new Set([99999]));
+  });
+  it("OBSERVATORY_IGNORE_PRS parses a custom csv of ints", () => {
+    const cfg = readConfig({ ...base, OBSERVATORY_IGNORE_PRS: "99999, 88888,1" });
+    expect(cfg.ignorePrs).toEqual(new Set([99999, 88888, 1]));
+  });
+  it("OBSERVATORY_IGNORE_PRS throws on a non-integer entry", () => {
+    expect(() => readConfig({ ...base, OBSERVATORY_IGNORE_PRS: "99999,abc" })).toThrow(
+      /OBSERVATORY_IGNORE_PRS/,
+    );
+  });
   it("OBSERVATORY_PUSH_ENABLED=false is the kill switch", () => {
     expect(readConfig({ ...base, OBSERVATORY_PUSH_ENABLED: "false" }).pushEnabled).toBe(false);
   });
