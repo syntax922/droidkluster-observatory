@@ -396,4 +396,142 @@ describe("ReplayPlayer", () => {
     expect(r5Droid?.last_action).toBe("coder opened · PR #130");
     vi.useRealTimers();
   });
+
+  it("a run of 3+ consecutive system check_run events collapses to one dwell/onFrame beat", () => {
+    vi.useFakeTimers();
+    const checkRun = (id: string, at: string): PublicEvent => ({
+      id,
+      at,
+      droid: "system",
+      kind: "check_run",
+      pr: 42,
+      summary: `CI skipped (${id}) · PR #42`,
+    });
+    const batchBundle: ReplayBundle = {
+      id: "batch",
+      title: "batch",
+      captured_on: "2026-07-25",
+      pr: 42,
+      events: [
+        {
+          id: "a",
+          at: "2026-07-25T00:00:00Z",
+          droid: "system",
+          kind: "pr_opened",
+          pr: 42,
+          summary: "PR #42 opened",
+        },
+        checkRun("c1", "2026-07-25T00:01:00Z"),
+        checkRun("c2", "2026-07-25T00:02:00Z"),
+        checkRun("c3", "2026-07-25T00:03:00Z"),
+        {
+          id: "z",
+          at: "2026-07-25T00:04:00Z",
+          droid: "hk-47",
+          kind: "review_posted",
+          pr: 42,
+          summary: "review APPROVED · PR #42",
+        },
+      ],
+    };
+    const frameFeeds: PublicEvent[][] = [];
+    const onDone = vi.fn();
+    const player = new ReplayPlayer(batchBundle, {
+      onFrame: (_snap, feed) => frameFeeds.push([...feed]),
+      onDone,
+    });
+    player.start();
+    // pr_opened fires immediately as its own beat.
+    expect(frameFeeds).toHaveLength(1);
+    // The 3-run of check_run events collapses to ONE beat: a single base
+    // dwell (1600ms) advances the frame, not 3x1600ms.
+    vi.advanceTimersByTime(1600);
+    expect(frameFeeds).toHaveLength(2);
+    // But all 3 underlying events were fed through the reducer and joined
+    // the feed — state/round-trip fidelity is untouched by the batch.
+    const batchFrame = frameFeeds[1];
+    expect(batchFrame?.map((e) => e.id)).toEqual(["a", "c1", "c2", "c3"]);
+    // Confirm it didn't take 2 more dwells to get here (i.e. it wasn't
+    // still rendering per-event) — advancing only 1 more base dwell moves
+    // on to the final review_posted beat.
+    vi.advanceTimersByTime(1600);
+    expect(frameFeeds).toHaveLength(3);
+    expect(onDone).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("a run of exactly 2 consecutive system check_run events does not batch", () => {
+    vi.useFakeTimers();
+    const checkRun = (id: string, at: string): PublicEvent => ({
+      id,
+      at,
+      droid: "system",
+      kind: "check_run",
+      pr: 42,
+      summary: `CI skipped (${id}) · PR #42`,
+    });
+    const twoBundle: ReplayBundle = {
+      id: "two",
+      title: "two",
+      captured_on: "2026-07-25",
+      pr: 42,
+      events: [checkRun("c1", "2026-07-25T00:00:00Z"), checkRun("c2", "2026-07-25T00:01:00Z")],
+    };
+    const frameFeeds: PublicEvent[][] = [];
+    const onDone = vi.fn();
+    const player = new ReplayPlayer(twoBundle, {
+      onFrame: (_snap, feed) => frameFeeds.push([...feed]),
+      onDone,
+    });
+    player.start();
+    expect(frameFeeds).toHaveLength(1); // c1 fires immediately, unbatched
+    vi.advanceTimersByTime(1600);
+    expect(frameFeeds).toHaveLength(2); // c2 fires as its own beat
+    expect(onDone).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it("a check_run event attributed to 2-1B never batches, even amid a system run", () => {
+    vi.useFakeTimers();
+    const checkRun = (id: string, at: string): PublicEvent => ({
+      id,
+      at,
+      droid: "system",
+      kind: "check_run",
+      pr: 42,
+      summary: `CI skipped (${id}) · PR #42`,
+    });
+    const redCheckRun: PublicEvent = {
+      id: "red",
+      at: "2026-07-25T00:02:00Z",
+      droid: "2-1b",
+      kind: "check_run",
+      pr: 42,
+      summary: "CI red (test-unit) · PR #42",
+    };
+    const mixedBundle: ReplayBundle = {
+      id: "mixed",
+      title: "mixed",
+      captured_on: "2026-07-25",
+      pr: 42,
+      events: [
+        checkRun("c1", "2026-07-25T00:00:00Z"),
+        checkRun("c2", "2026-07-25T00:01:00Z"),
+        redCheckRun,
+        checkRun("c3", "2026-07-25T00:03:00Z"),
+        checkRun("c4", "2026-07-25T00:04:00Z"),
+      ],
+    };
+    const frameFeeds: PublicEvent[][] = [];
+    const player = new ReplayPlayer(mixedBundle, {
+      onFrame: (_snap, feed) => frameFeeds.push([...feed]),
+      onDone: () => {},
+    });
+    player.start();
+    vi.runAllTimers();
+    // The 2-1B hop splits the run into two runs of 2 (below threshold), so
+    // all 5 events render as 5 separate beats/frames.
+    expect(frameFeeds).toHaveLength(5);
+    vi.useRealTimers();
+  });
 });

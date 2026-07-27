@@ -159,6 +159,185 @@ describe("renderChains", () => {
   });
 });
 
+describe("renderChains — consecutive-CI batching", () => {
+  function checkRunHop(at: string, label: string): Chain["hops"][number] {
+    return { at, droid: "system", kind: "check_run", label };
+  }
+
+  it("collapses a run of 3+ consecutive system check_run hops into one row", () => {
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        checkRunHop("2026-07-25T13:00:00Z", "CI skipped (a) · PR #42"),
+        checkRunHop("2026-07-25T13:00:01Z", "CI skipped (b) · PR #42"),
+        checkRunHop("2026-07-25T13:00:02Z", "CI cancelled (c) · PR #42"),
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    const rows = el.querySelectorAll(".tl-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.querySelector(".tl-label")?.textContent).toBe(
+      "3 CI checks · 2 skipped, 1 cancelled",
+    );
+  });
+
+  it("does not batch a run of exactly 2 consecutive system check_run hops", () => {
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        checkRunHop("2026-07-25T13:00:00Z", "CI skipped (a) · PR #42"),
+        checkRunHop("2026-07-25T13:00:01Z", "CI cancelled (b) · PR #42"),
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    const rows = el.querySelectorAll(".tl-row");
+    expect(rows).toHaveLength(2);
+    expect(el.querySelector(".tl-label")?.textContent).not.toContain("CI checks");
+  });
+
+  it("counts distinct conclusion words, most common first, alphabetical tiebreak", () => {
+    const hops: Chain["hops"] = [];
+    for (let i = 0; i < 7; i++)
+      hops.push(checkRunHop(`2026-07-25T13:00:0${i}Z`, `CI skipped (s${i}) · PR #42`));
+    for (let i = 0; i < 5; i++)
+      hops.push(checkRunHop(`2026-07-25T13:00:1${i}Z`, `CI cancelled (c${i}) · PR #42`));
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops,
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    expect(el.querySelector(".tl-label")?.textContent).toBe(
+      "12 CI checks · 7 skipped, 5 cancelled",
+    );
+  });
+
+  it("treats an unrecognized label shape as 'completed' in the summary", () => {
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        checkRunHop("2026-07-25T13:00:00Z", "something odd"),
+        checkRunHop("2026-07-25T13:00:01Z", "something odd"),
+        checkRunHop("2026-07-25T13:00:02Z", "something odd"),
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    expect(el.querySelector(".tl-label")?.textContent).toBe("3 CI checks · 3 completed");
+  });
+
+  it("batched row uses the dim neutral node, the first hop's offset, and no title", () => {
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        checkRunHop("2026-07-25T13:00:00Z", "CI skipped (a) · PR #42"),
+        checkRunHop("2026-07-25T13:05:00Z", "CI skipped (b) · PR #42"),
+        checkRunHop("2026-07-25T13:10:00Z", "CI skipped (c) · PR #42"),
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    const row = el.querySelector(".tl-row");
+    expect((row?.querySelector(".tl-node") as HTMLElement).style.backgroundColor).toBe(
+      "rgb(107, 119, 137)",
+    );
+    expect(row?.querySelector(".tl-time")?.textContent).toBe("+0s");
+    expect(row?.querySelector(".tl-label")?.getAttribute("title")).toBeNull();
+    expect(row?.getAttribute("title")).toBeNull();
+  });
+
+  it("a check_run hop attributed to 2-1B (CI-red) never batches, even amid a system run", () => {
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        checkRunHop("2026-07-25T13:00:00Z", "CI skipped (a) · PR #42"),
+        checkRunHop("2026-07-25T13:00:01Z", "CI skipped (b) · PR #42"),
+        {
+          at: "2026-07-25T13:00:02Z",
+          droid: "2-1b",
+          kind: "check_run",
+          label: "CI red (test-unit) · PR #42",
+        },
+        checkRunHop("2026-07-25T13:00:03Z", "CI skipped (c) · PR #42"),
+        checkRunHop("2026-07-25T13:00:04Z", "CI skipped (d) · PR #42"),
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    // The 2-1B hop splits the run into two runs of 2 — neither reaches the
+    // batch threshold, so all 5 hops render individually.
+    const rows = el.querySelectorAll(".tl-row");
+    expect(rows).toHaveLength(5);
+    expect(el.textContent).toContain("CI red (test-unit)");
+    expect(el.querySelector(".tl-label")?.textContent).not.toContain("CI checks");
+  });
+});
+
+describe("renderChains — name de-dup", () => {
+  it("omits the .tl-droid tag when the label already opens with the droid's name", () => {
+    const c: Chain = {
+      pr: 1663,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        {
+          at: "2026-07-25T13:00:00Z",
+          droid: "hk-47",
+          kind: "review_started",
+          label: "HK-47 review started · PR #1663",
+        },
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    const row = el.querySelector(".tl-row");
+    expect(row?.querySelector(".tl-droid")).toBeNull();
+    expect((row?.textContent?.match(/HK-47/g) ?? []).length).toBe(1);
+  });
+
+  it("keeps the .tl-droid tag when the label doesn't open with the droid's name", () => {
+    const c: Chain = {
+      pr: 1663,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        {
+          at: "2026-07-25T13:00:00Z",
+          droid: "hk-47",
+          kind: "review_posted",
+          label: "review CHANGES_REQUESTED · PR #1663",
+        },
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    const row = el.querySelector(".tl-row");
+    expect(row?.querySelector(".tl-droid")?.textContent).toBe("HK-47");
+  });
+});
+
 // Accent sanity: the hk-47 accent used above really is a distinct color from
 // the system dim neutral, so the "not equal" assertion above is meaningful.
 describe("accent sanity", () => {
