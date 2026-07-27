@@ -4,11 +4,14 @@ import { createCelebrationTracker } from "./celebrate.js";
 import { fetchReplayBundle, fetchReplayIndex, startPolling } from "./data.js";
 import type { BoardView } from "./dmd/controller.js";
 import { startDmd } from "./dmd/controller.js";
+import type { LaneState } from "./journey-controller.js";
+import { startJourneys } from "./journey-controller.js";
+import { buildLiveLanes, buildReplayLane } from "./journey-lanes.js";
 import { renderChains } from "./render/chains.js";
 import { renderDossier } from "./render/dossier.js";
 import { renderHonesty } from "./render/honesty.js";
+import { renderJourneys } from "./render/journeys.js";
 import { renderStations } from "./render/stations.js";
-import { renderTicker } from "./render/ticker.js";
 import { createReplayController } from "./replay-controller.js";
 import { ReplayPlayer } from "./replay.js";
 import { decideMode } from "./shell.js";
@@ -21,7 +24,7 @@ const els = {
   honesty: document.querySelector("#honesty") as HTMLElement,
   stations: document.querySelector("#stations") as HTMLElement,
   chains: document.querySelector("#chains") as HTMLElement,
-  ticker: document.querySelector("#ticker") as HTMLElement,
+  journeys: document.querySelector("#journeys") as HTMLElement,
   dossier: document.querySelector("#dossier") as HTMLElement,
 };
 
@@ -34,8 +37,17 @@ let lastKnownContact = new Date(0).toISOString();
 // sync with whatever's on screen, even though it paints on its own clock.
 let lastBoard: BoardView = { mode: "idle", droids: [], celebrating: false };
 
-// excerptsByPr for the LIVE feed, rebuilt each time the ticker's feed fetch
-// resolves (see refreshTickerFromFeed). Keyed by PR, then by `${kind}|${at}`
+// Tracks the latest per-chain journey state for the journey controller's
+// pull-based getLanes(). renderLive/onFrame set it fresh (dimmed: false);
+// the stale/onStale/onIdle paths do NOT recompute it (there's no fresher
+// chain data to recompute from) — they instead re-map the existing
+// laneState to dimmed: true, so the journey controller freezes each lane's
+// dot at its last position and renders it with the DMD "dim + motionless"
+// idiom instead of implying live progress that isn't happening.
+let laneState: LaneState[] = [];
+
+// excerptsByPr for the LIVE feed, rebuilt each time the day's feed fetch
+// resolves (see refreshExcerptsFromFeed). Keyed by PR, then by `${kind}|${at}`
 // so the story rail can look up the excerpt for a specific hop.
 let liveExcerptsByPr = new Map<number, Map<string, string>>();
 
@@ -44,7 +56,7 @@ function liveExcerptsFor(pr: number): Map<string, string> {
 }
 
 // Builds the `${kind}|${at}` -> excerpt lookup renderChains expects, scoped
-// to a single feed of events (live ticker feed, or a replay's accumulated
+// to a single feed of events (the live day-feed, or a replay's accumulated
 // feed — each call site owns its own map so replay excerpts never leak into
 // the live view or vice versa).
 function buildExcerptsByPr(events: PublicEvent[]): Map<number, Map<string, string>> {
@@ -80,23 +92,25 @@ function renderLive(snap: CurrentSnapshot): void {
   const now = Date.now();
   renderStations(els.stations, snap.droids, now);
   renderChains(els.chains, snap.chains, liveExcerptsFor);
+  const { lanes, states } = buildLiveLanes(snap.chains);
+  renderJourneys(els.journeys, lanes);
+  laneState = states;
   renderHonesty(els.honesty, { mode: "live", lastContact: snap.last_contact, nowMs: now });
   lastBoard = { mode: "live", droids: snap.droids, celebrating: celebration.observe(snap.chains) };
 }
 
-async function refreshTickerFromFeed(): Promise<void> {
+async function refreshExcerptsFromFeed(): Promise<void> {
   const day = new Date().toISOString().slice(0, 10);
   try {
     const res = await fetch(`${DATA_BASE}/feed/${day}.json`, { cache: "no-cache" });
     if (res.ok) {
       const body = (await res.json()) as { events?: PublicEvent[] };
       if (Array.isArray(body.events)) {
-        renderTicker(els.ticker, body.events);
         liveExcerptsByPr = buildExcerptsByPr(body.events);
       }
     }
   } catch {
-    /* keep last ticker */
+    /* keep last known excerpts */
   }
 }
 
@@ -109,7 +123,9 @@ const replay = createReplayController({
     const replayExcerptsByPr = buildExcerptsByPr(feed);
     renderStations(els.stations, snap.droids, replayNow);
     renderChains(els.chains, snap.chains, (pr) => replayExcerptsByPr.get(pr) ?? new Map());
-    renderTicker(els.ticker, feed);
+    const built = buildReplayLane(feed);
+    renderJourneys(els.journeys, built ? [built.lane] : []);
+    laneState = built ? [built.state] : [];
     renderHonesty(els.honesty, {
       mode: "replay",
       lastContact: lastKnownContact,
@@ -127,6 +143,7 @@ const replay = createReplayController({
     // stale live/replay render standing silently.
     renderHonesty(els.honesty, { mode: "idle", lastContact, nowMs: Date.now() });
     lastBoard = { mode: "idle", droids: lastBoard.droids, celebrating: false };
+    laneState = laneState.map((s) => ({ ...s, dimmed: true }));
   },
 });
 
@@ -135,6 +152,7 @@ const replay = createReplayController({
 document.documentElement.dataset.build = "2026-07-27";
 
 startDmd({ root: els.stations, getBoard: () => lastBoard });
+startJourneys({ root: els.journeys, getLanes: () => laneState });
 
 startPolling({
   base: DATA_BASE,
@@ -147,7 +165,7 @@ startPolling({
       // painting, so a newly-arrived excerpt-bearing hop renders its quote
       // card on this snapshot instead of waiting for the next ~20s poll.
       // The catch keeps a feed failure from blocking the board render.
-      await refreshTickerFromFeed().catch(() => {});
+      await refreshExcerptsFromFeed().catch(() => {});
       renderLive(snap);
     } else if (mode === "stale") {
       replay.exit();
@@ -157,6 +175,7 @@ startPolling({
         nowMs: Date.now(),
       });
       lastBoard = { mode: "stale", droids: lastBoard.droids, celebrating: false };
+      laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     } else {
       lastKnownContact = snap.last_contact;
       void replay.enter(snap.last_contact);
@@ -170,6 +189,7 @@ startPolling({
         nowMs: Date.now(),
       });
       lastBoard = { mode: "stale", droids: lastBoard.droids, celebrating: false };
+      laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     }
     lastKnownContact = lastGood?.last_contact ?? new Date(0).toISOString();
     void replay.enter(lastKnownContact);
