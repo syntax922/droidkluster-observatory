@@ -60,10 +60,14 @@ function drawPath(f: Frame): void {
   for (let x = x0; x <= x1; x += 2) px(f, x, ROW_Y, 1);
 }
 
-function drawStations(f: Frame, visited: boolean[]): void {
+function drawStations(f: Frame, visited: boolean[], dimmed: boolean): void {
   for (let i = 0; i < STATION_COUNT; i++) {
     const x = STATION_XS[i] ?? 0;
-    if (visited[i]) {
+    // Dimmed (stale/idle telemetry): collapse the visited/unvisited diamond
+    // distinction to a single flat intensity-1 dot per station — the DMD
+    // stale idiom is "dim + motionless", not "dim but still legible as
+    // progress". See drawDot()'s matching pulse-off + lower-intensity path.
+    if (visited[i] && !dimmed) {
       // ~3px diamond outline: a hair brighter than the dotted path, so a
       // visited station reads as "touched" without competing with the dot.
       px(f, x, ROW_Y - 1, 2);
@@ -87,10 +91,14 @@ function drawTrail(f: Frame, trail: number[]): void {
   });
 }
 
-function drawDot(f: Frame, position: number, tMs: number): void {
-  const pulse = Math.sin(tMs / 220) * DOT_PULSE_PX;
+function drawDot(f: Frame, position: number, tMs: number, dimmed: boolean): void {
+  // Dimmed: static (no pulse) and one intensity level below the live dot —
+  // "frozen at current position" is the caller's job (it passes a position
+  // that isn't advancing); this function only needs to stop animating the
+  // pulse and step the intensity down to match.
+  const pulse = dimmed ? 0 : Math.sin(tMs / 220) * DOT_PULSE_PX;
   const x = Math.round(positionToX(position) + pulse);
-  fillRect(f, x - 1, ROW_Y - 1, 3, 3, 3);
+  fillRect(f, x - 1, ROW_Y - 1, 3, 3, dimmed ? 2 : 3);
 }
 
 export function journeyFrame(
@@ -98,11 +106,12 @@ export function journeyFrame(
   visited: boolean[],
   trail: number[],
   tMs: number,
+  dimmed = false,
 ): Frame {
   const f = blank();
   drawPath(f);
-  drawStations(f, visited);
+  drawStations(f, visited, dimmed);
   drawTrail(f, trail);
-  drawDot(f, position, tMs);
+  drawDot(f, position, tMs, dimmed);
   return f;
 }

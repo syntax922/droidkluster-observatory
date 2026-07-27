@@ -35,6 +35,7 @@ describe("startJourneys", () => {
           stageIndex: 0,
           visited: [true, false, false, false, false, false],
           droid: "system",
+          dimmed: false,
         },
       ],
     });
@@ -58,6 +59,7 @@ describe("startJourneys", () => {
             stageIndex: 1,
             visited: [true, true, false, false, false, false],
             droid: "hk-47",
+            dimmed: false,
           },
         ],
       });
@@ -98,6 +100,7 @@ describe("startJourneys", () => {
           stageIndex: 2,
           visited: [true, true, true, false, false, false],
           droid: "2-1b",
+          dimmed: false,
         },
       ],
     });
@@ -129,7 +132,7 @@ describe("startJourneys", () => {
       raf,
       now: () => t,
       paint,
-      getLanes: () => [{ key: "pr-1", stageIndex, visited, droid: "r5" }],
+      getLanes: () => [{ key: "pr-1", stageIndex, visited, droid: "r5", dimmed: false }],
     });
 
     // Fire the first scheduled frame: lane starts at stage 0, tween settles
@@ -155,6 +158,49 @@ describe("startJourneys", () => {
     const last = paintedFrames[paintedFrames.length - 1] as Uint8Array;
     expect(dotNear(last, STATION3_X)).toBe(true);
     expect(dotNear(last, STATION0_X)).toBe(false);
+
+    stop();
+  });
+
+  it("a dimmed lane freezes: identical frames at t and t+500, no pulse/tween motion", () => {
+    const paintedFrames: Uint8Array[] = [];
+    const paint = vi.fn((_el: unknown, frame: Uint8Array) => {
+      paintedFrames.push(frame);
+    });
+    let t = 1000;
+    let queued: (() => void) | null = null;
+    const raf = vi.fn((cb: () => void) => {
+      queued = cb;
+    });
+    const root = document.createElement("div");
+    root.innerHTML = laneCanvas("pr-1");
+
+    const stop = startJourneys({
+      root,
+      reducedMotion: false,
+      raf,
+      now: () => t,
+      paint,
+      getLanes: () => [
+        {
+          key: "pr-1",
+          stageIndex: 2,
+          visited: [true, true, true, false, false, false],
+          droid: "hk-47",
+          dimmed: true,
+        },
+      ],
+    });
+
+    (queued as (() => void) | null)?.(); // first dimmed tick: snapshots the frozen position
+    expect(paint).toHaveBeenCalledTimes(1);
+
+    t += 500; // advance real time — a pulse (sin(tMs/220)) would move if animating
+    (queued as (() => void) | null)?.();
+    expect(paint).toHaveBeenCalledTimes(2);
+
+    const [frameAtT, frameAtTPlus500] = paintedFrames;
+    expect(Array.from(frameAtT as Uint8Array)).toEqual(Array.from(frameAtTPlus500 as Uint8Array));
 
     stop();
   });

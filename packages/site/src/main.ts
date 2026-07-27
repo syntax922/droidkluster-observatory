@@ -1,4 +1,4 @@
-import type { Chain, CurrentSnapshot, DroidId, PublicEvent } from "@observatory/core";
+import type { CurrentSnapshot, DroidId, PublicEvent } from "@observatory/core";
 import { DroidIdSchema } from "@observatory/core";
 import { createCelebrationTracker } from "./celebrate.js";
 import { fetchReplayBundle, fetchReplayIndex, startPolling } from "./data.js";
@@ -6,84 +6,16 @@ import type { BoardView } from "./dmd/controller.js";
 import { startDmd } from "./dmd/controller.js";
 import type { LaneState } from "./journey-controller.js";
 import { startJourneys } from "./journey-controller.js";
-import { STAGES, type Stage, chainStage, stageOf } from "./journey.js";
+import { buildLiveLanes, buildReplayLane } from "./journey-lanes.js";
 import { renderChains } from "./render/chains.js";
 import { renderDossier } from "./render/dossier.js";
 import { renderHonesty } from "./render/honesty.js";
-import { type JourneyLane, renderJourneys } from "./render/journeys.js";
+import { renderJourneys } from "./render/journeys.js";
 import { renderStations } from "./render/stations.js";
 import { createReplayController } from "./replay-controller.js";
 import { ReplayPlayer } from "./replay.js";
 import { decideMode } from "./shell.js";
 import "./style.css";
-
-// Caps how many chains get their own lane on the live journey map — more
-// than a handful of simultaneous lanes stops being a spatial "where is it"
-// view and turns back into a scrolling list, which is the exact problem
-// this replaces the ticker to solve.
-const LIVE_LANE_CAP = 4;
-
-function visitedStages(hopKinds: Iterable<PublicEvent["kind"]>): boolean[] {
-  const visited = STAGES.map(() => false);
-  for (const kind of hopKinds) {
-    const stage = stageOf(kind);
-    if (stage) visited[STAGES.indexOf(stage)] = true;
-  }
-  return visited;
-}
-
-// Builds both the DOM-facing lanes (render/journeys.ts) and the
-// controller-facing lane states (journey-controller.ts) from the same
-// ordered chain list, sharing a `pr-${pr}` key between the two so the
-// controller's canvas lookup lines up with what renderJourneys just drew.
-function buildLiveLanes(chains: Chain[]): { lanes: JourneyLane[]; states: LaneState[] } {
-  const ordered = [...chains].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  const lanes: JourneyLane[] = [];
-  const states: LaneState[] = [];
-  for (const c of ordered.slice(0, LIVE_LANE_CAP)) {
-    const { stage, droid } = chainStage(c);
-    const key = `pr-${c.pr}`;
-    const latest = c.hops[c.hops.length - 1]?.label ?? "opened";
-    lanes.push({ pr: c.pr, latest, droid, canvasKey: key });
-    states.push({
-      key,
-      stageIndex: STAGES.indexOf(stage),
-      visited: visitedStages(c.hops.map((h) => h.kind)),
-      droid,
-    });
-  }
-  return { lanes, states };
-}
-
-// Replay's onFrame only carries the flat feed of PublicEvents seen so far
-// (not a Chain), so this mirrors chainStage()'s "last hop with a non-null
-// stage wins" rule directly over that feed instead.
-function buildReplayLane(feed: PublicEvent[]): { lane: JourneyLane; state: LaneState } {
-  const lastEvent = feed[feed.length - 1];
-  const pr = lastEvent?.pr ?? 0;
-  const key = `replay-${pr}`;
-  let stage: Stage = "opened";
-  let droid: DroidId | "system" = "system";
-  for (let i = feed.length - 1; i >= 0; i--) {
-    const e = feed[i];
-    const s = e ? stageOf(e.kind) : null;
-    if (e && s) {
-      stage = s;
-      droid = e.droid;
-      break;
-    }
-  }
-  const latest = lastEvent?.summary ?? "opened";
-  return {
-    lane: { pr, latest, droid, canvasKey: key },
-    state: {
-      key,
-      stageIndex: STAGES.indexOf(stage),
-      visited: visitedStages(feed.map((e) => e.kind)),
-      droid,
-    },
-  };
-}
 
 const DATA_BASE = import.meta.env.VITE_DATA_BASE ?? "https://data.whatis.droidkluster.com";
 const POLL_MS = 20_000;
@@ -106,8 +38,12 @@ let lastKnownContact = new Date(0).toISOString();
 let lastBoard: BoardView = { mode: "idle", droids: [], celebrating: false };
 
 // Tracks the latest per-chain journey state for the journey controller's
-// pull-based getLanes(). Updated in the same render paths that update
-// lastBoard, so the traveling dots stay in sync with whatever's on screen.
+// pull-based getLanes(). renderLive/onFrame set it fresh (dimmed: false);
+// the stale/onStale/onIdle paths do NOT recompute it (there's no fresher
+// chain data to recompute from) — they instead re-map the existing
+// laneState to dimmed: true, so the journey controller freezes each lane's
+// dot at its last position and renders it with the DMD "dim + motionless"
+// idiom instead of implying live progress that isn't happening.
 let laneState: LaneState[] = [];
 
 // excerptsByPr for the LIVE feed, rebuilt each time the day's feed fetch
@@ -187,9 +123,9 @@ const replay = createReplayController({
     const replayExcerptsByPr = buildExcerptsByPr(feed);
     renderStations(els.stations, snap.droids, replayNow);
     renderChains(els.chains, snap.chains, (pr) => replayExcerptsByPr.get(pr) ?? new Map());
-    const { lane, state } = buildReplayLane(feed);
-    renderJourneys(els.journeys, [lane]);
-    laneState = [state];
+    const built = buildReplayLane(feed);
+    renderJourneys(els.journeys, built ? [built.lane] : []);
+    laneState = built ? [built.state] : [];
     renderHonesty(els.honesty, {
       mode: "replay",
       lastContact: lastKnownContact,
@@ -207,6 +143,7 @@ const replay = createReplayController({
     // stale live/replay render standing silently.
     renderHonesty(els.honesty, { mode: "idle", lastContact, nowMs: Date.now() });
     lastBoard = { mode: "idle", droids: lastBoard.droids, celebrating: false };
+    laneState = laneState.map((s) => ({ ...s, dimmed: true }));
   },
 });
 
@@ -238,6 +175,7 @@ startPolling({
         nowMs: Date.now(),
       });
       lastBoard = { mode: "stale", droids: lastBoard.droids, celebrating: false };
+      laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     } else {
       lastKnownContact = snap.last_contact;
       void replay.enter(snap.last_contact);
@@ -251,6 +189,7 @@ startPolling({
         nowMs: Date.now(),
       });
       lastBoard = { mode: "stale", droids: lastBoard.droids, celebrating: false };
+      laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     }
     lastKnownContact = lastGood?.last_contact ?? new Date(0).toISOString();
     void replay.enter(lastKnownContact);
