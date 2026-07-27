@@ -34,6 +34,30 @@ let lastKnownContact = new Date(0).toISOString();
 // sync with whatever's on screen, even though it paints on its own clock.
 let lastBoard: BoardView = { mode: "idle", droids: [], celebrating: false };
 
+// excerptsByPr for the LIVE feed, rebuilt each time the ticker's feed fetch
+// resolves (see refreshTickerFromFeed). Keyed by PR, then by `${kind}|${at}`
+// so the story rail can look up the excerpt for a specific hop.
+let liveExcerptsByPr = new Map<number, Map<string, string>>();
+
+function liveExcerptsFor(pr: number): Map<string, string> {
+  return liveExcerptsByPr.get(pr) ?? new Map();
+}
+
+// Builds the `${kind}|${at}` -> excerpt lookup renderChains expects, scoped
+// to a single feed of events (live ticker feed, or a replay's accumulated
+// feed — each call site owns its own map so replay excerpts never leak into
+// the live view or vice versa).
+function buildExcerptsByPr(events: PublicEvent[]): Map<number, Map<string, string>> {
+  const byPr = new Map<number, Map<string, string>>();
+  for (const e of events) {
+    if (e.pr === undefined || e.excerpt === undefined) continue;
+    const forPr = byPr.get(e.pr) ?? new Map<string, string>();
+    forPr.set(`${e.kind}|${e.at}`, e.excerpt);
+    byPr.set(e.pr, forPr);
+  }
+  return byPr;
+}
+
 // Edge-triggered celebration: the trigger is the OBSERVED merge event (a
 // pr_merged hop newer than any previously seen), not an age window on "now".
 // An age window either never lands (live polling can miss the merge while
@@ -51,7 +75,7 @@ const celebration = createCelebrationTracker();
 function renderLive(snap: CurrentSnapshot): void {
   const now = Date.now();
   renderStations(els.stations, snap.droids, now);
-  renderChains(els.chains, snap.chains);
+  renderChains(els.chains, snap.chains, liveExcerptsFor);
   renderHonesty(els.honesty, { mode: "live", lastContact: snap.last_contact, nowMs: now });
   lastBoard = { mode: "live", droids: snap.droids, celebrating: celebration.observe(snap.chains) };
 }
@@ -62,7 +86,10 @@ async function refreshTickerFromFeed(): Promise<void> {
     const res = await fetch(`${DATA_BASE}/feed/${day}.json`, { cache: "no-cache" });
     if (res.ok) {
       const body = (await res.json()) as { events?: PublicEvent[] };
-      if (Array.isArray(body.events)) renderTicker(els.ticker, body.events);
+      if (Array.isArray(body.events)) {
+        renderTicker(els.ticker, body.events);
+        liveExcerptsByPr = buildExcerptsByPr(body.events);
+      }
     }
   } catch {
     /* keep last ticker */
@@ -75,8 +102,9 @@ const replay = createReplayController({
   makePlayer: (bundle, opts) => new ReplayPlayer(bundle, opts),
   onFrame: (snap, feed, label) => {
     const replayNow = Date.parse(snap.generated_at);
+    const replayExcerptsByPr = buildExcerptsByPr(feed);
     renderStations(els.stations, snap.droids, replayNow);
-    renderChains(els.chains, snap.chains);
+    renderChains(els.chains, snap.chains, (pr) => replayExcerptsByPr.get(pr) ?? new Map());
     renderTicker(els.ticker, feed);
     renderHonesty(els.honesty, {
       mode: "replay",

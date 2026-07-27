@@ -53,28 +53,110 @@ body {
 .chain {
   border: 1px solid var(--line);
   border-radius: 4px;
-  margin: 8px 0;
-  padding: 8px;
+  margin: 10px 0;
+  padding: 10px 12px 10px 8px;
 }
 .chain--active {
   border-color: var(--active);
 }
 .chain-head {
   font-weight: 700;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+  padding-left: 10px;
 }
-.chain-track {
+
+/* Vertical story rail: one .timeline per chain, one .tl-row per hop. */
+.timeline {
+  position: relative;
+  padding-left: 22px;
+}
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--line);
+}
+.tl-row {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
-.hop {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 3px;
-  padding: 2px 8px;
+.tl-node {
+  position: absolute;
+  left: -22px;
+  top: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.tl-time {
+  flex: 0 0 auto;
+  min-width: 3.5ch;
+  color: var(--dim);
+  font-size: 0.72rem;
+}
+.tl-droid {
+  flex: 0 0 auto;
+  font-weight: 700;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.tl-label {
+  flex: 1 1 240px;
+}
+.tl-excerpt {
+  flex-basis: 100%;
+  margin: 2px 0 6px;
+  padding: 4px 10px;
+  border-left: 2px solid var(--dim);
+  color: var(--dim);
+  font-style: italic;
   font-size: 0.75rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
+.tl-gap {
+  position: relative;
+  margin: 2px 0 2px 4px;
+  padding-left: 12px;
+  border-left: 1px dashed var(--line);
+  color: var(--dim);
+  font-size: 0.7rem;
+  font-style: italic;
+}
+
+@keyframes tl-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 2px var(--panel), 0 0 0 2px currentColor;
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--panel), 0 0 7px 3px currentColor;
+  }
+}
+.tl-now {
+  animation: tl-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tl-now {
+    animation: none;
+    box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px currentColor;
+  }
+}
+
 .tick {
   padding: 2px 0;
   font-size: 0.8rem;

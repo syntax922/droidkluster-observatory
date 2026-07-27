@@ -16,6 +16,14 @@ describe("renderHonesty", () => {
     expect(el.textContent).toContain("telemetry paused");
     expect(el.textContent).toContain("41m");
   });
+  it("stale mode scales past the minute ceiling instead of counting forever in minutes", () => {
+    // 3h before NOW: the old age() had no upper bound on minutes and would
+    // have shown "180m ago" forever; humanAge scales this to "3h ago".
+    const el = document.createElement("div");
+    renderHonesty(el, { mode: "stale", lastContact: "2026-07-25T11:00:41Z", nowMs: NOW });
+    expect(el.textContent).toContain("3h");
+    expect(el.textContent).not.toContain("180m");
+  });
   it("replay mode shows the replay label", () => {
     const el = document.createElement("div");
     renderHonesty(el, {

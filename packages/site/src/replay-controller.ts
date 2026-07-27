@@ -1,5 +1,4 @@
 import type { CurrentSnapshot, PublicEvent, ReplayBundle, ReplayIndex } from "@observatory/core";
-import { pickCompression } from "./replay.js";
 
 export interface ReplayControllerPlayer {
   start(): void;
@@ -7,7 +6,6 @@ export interface ReplayControllerPlayer {
 }
 
 export interface ReplayPlayerOpts {
-  compression: number;
   onFrame: (snap: CurrentSnapshot, feed: PublicEvent[], label: string) => void;
   onDone: () => void;
 }
@@ -72,9 +70,7 @@ export function createReplayController(deps: ReplayControllerDeps): ReplayContro
         return;
       }
 
-      const compression = pickCompression(bundle);
       const newPlayer = deps.makePlayer(bundle, {
-        compression,
         onFrame: deps.onFrame,
         onDone: () => {
           if (player === newPlayer) player = null; // next enter() picks the next bundle
