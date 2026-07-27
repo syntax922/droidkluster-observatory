@@ -35,7 +35,12 @@ let lastKnownContact = new Date(0).toISOString();
 // Tracks the latest board state for the DMD controller's pull-based getBoard().
 // Every render path (live/replay/stale/idle) updates this so the DMD stays in
 // sync with whatever's on screen, even though it paints on its own clock.
-let lastBoard: BoardView = { mode: "idle", droids: [], celebrating: false };
+let lastBoard: BoardView = {
+  mode: "idle",
+  droids: [],
+  celebrating: false,
+  renderedAtMs: Date.now(),
+};
 
 // Tracks the latest per-chain journey state for the journey controller's
 // pull-based getLanes(). renderLive/onFrame set it fresh (dimmed: false);
@@ -96,7 +101,12 @@ function renderLive(snap: CurrentSnapshot): void {
   renderJourneys(els.journeys, lanes);
   laneState = states;
   renderHonesty(els.honesty, { mode: "live", lastContact: snap.last_contact, nowMs: now });
-  lastBoard = { mode: "live", droids: snap.droids, celebrating: celebration.observe(snap.chains) };
+  lastBoard = {
+    mode: "live",
+    droids: snap.droids,
+    celebrating: celebration.observe(snap.chains),
+    renderedAtMs: now,
+  };
 }
 
 async function refreshExcerptsFromFeed(): Promise<void> {
@@ -136,13 +146,19 @@ const replay = createReplayController({
       mode: "replay",
       droids: snap.droids,
       celebrating: celebration.observe(snap.chains),
+      renderedAtMs: replayNow,
     };
   },
   onIdle: (lastContact) => {
     // No curated replays available: say so plainly rather than leaving a
     // stale live/replay render standing silently.
     renderHonesty(els.honesty, { mode: "idle", lastContact, nowMs: Date.now() });
-    lastBoard = { mode: "idle", droids: lastBoard.droids, celebrating: false };
+    lastBoard = {
+      mode: "idle",
+      droids: lastBoard.droids,
+      celebrating: false,
+      renderedAtMs: lastBoard.renderedAtMs,
+    };
     laneState = laneState.map((s) => ({ ...s, dimmed: true }));
   },
 });
@@ -174,7 +190,12 @@ startPolling({
         lastContact: snap.last_contact,
         nowMs: Date.now(),
       });
-      lastBoard = { mode: "stale", droids: lastBoard.droids, celebrating: false };
+      lastBoard = {
+        mode: "stale",
+        droids: lastBoard.droids,
+        celebrating: false,
+        renderedAtMs: lastBoard.renderedAtMs,
+      };
       laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     } else {
       lastKnownContact = snap.last_contact;
@@ -188,7 +209,12 @@ startPolling({
         lastContact: lastGood.last_contact,
         nowMs: Date.now(),
       });
-      lastBoard = { mode: "stale", droids: lastBoard.droids, celebrating: false };
+      lastBoard = {
+        mode: "stale",
+        droids: lastBoard.droids,
+        celebrating: false,
+        renderedAtMs: lastBoard.renderedAtMs,
+      };
       laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     }
     lastKnownContact = lastGood?.last_contact ?? new Date(0).toISOString();

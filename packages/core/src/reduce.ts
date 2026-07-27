@@ -13,6 +13,7 @@ export interface DroidState {
   task?: string;
   since?: string;
   last_action?: string;
+  last_action_at?: string;
 }
 
 export type ChainState = Chain & { events: PublicEvent[] };
@@ -257,7 +258,7 @@ export function reduce(
     state.droids[c.activate.droid].since = at;
   }
   if (c.idle) {
-    state.droids[c.idle.droid] = { last_action: c.idle.last_action };
+    state.droids[c.idle.droid] = { last_action: c.idle.last_action, last_action_at: at };
   }
 
   if (c.pr !== undefined) {
