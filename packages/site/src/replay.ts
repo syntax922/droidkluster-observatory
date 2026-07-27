@@ -37,6 +37,12 @@ const MIN_DWELL_MS = 700;
 // narrative beat, at the pacing layer too.
 const BATCH_MIN_RUN = 3;
 
+// Mirrors chains.ts's GAP_THRESHOLD_MS: a run only holds together while
+// consecutive events stay within this real-time gap. A quiet stretch this
+// long inside what would otherwise be one batch is a pause worth its own
+// beat, not noise to compress away.
+const BATCH_GAP_THRESHOLD_MS = 10 * 60 * 1000;
+
 function baseDwellFor(event: PublicEvent): number {
   if (event.excerpt) return EXCERPT_DWELL_MS;
   if (event.kind === "pr_merged" || event.kind === "pr_closed") return MERGE_DWELL_MS;
@@ -69,7 +75,9 @@ function buildBeats(events: PublicEvent[]): Beat[] {
       let j = i + 1;
       while (j < events.length) {
         const next = events[j];
+        const prev = events[j - 1];
         if (!next || !isBatchableCheckRun(next)) break;
+        if (prev && Date.parse(next.at) - Date.parse(prev.at) > BATCH_GAP_THRESHOLD_MS) break;
         j++;
       }
       const run = events.slice(i, j);
