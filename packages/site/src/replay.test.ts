@@ -190,6 +190,49 @@ describe("ReplayPlayer", () => {
     vi.useRealTimers();
   });
 
+  it("an all-excerpt bundle never divides by zero (nonExcerptSum===0 guard) and leaves every dwell unscaled", () => {
+    vi.useFakeTimers();
+    const total = 60;
+    const events: PublicEvent[] = Array.from({ length: total }, (_, i) => ({
+      id: `x${i}`,
+      at: new Date(Date.parse("2026-07-25T00:00:00Z") + i * 60_000).toISOString(),
+      droid: "hk-47",
+      kind: "review_posted",
+      pr: 500,
+      summary: "review APPROVED · PR #500",
+      excerpt: "Every one of these carries prose, so nothing here should ever get scaled down.",
+    }));
+    const allExcerptBundle: ReplayBundle = {
+      id: "all-excerpt",
+      title: "all excerpt",
+      captured_on: "2026-07-25",
+      pr: 500,
+      events,
+    };
+
+    const timestamps: number[] = [];
+    const onDone = vi.fn();
+    const player = new ReplayPlayer(allExcerptBundle, {
+      onFrame: () => timestamps.push(Date.now()),
+      onDone,
+    });
+    const start = Date.now();
+    expect(() => player.start()).not.toThrow();
+    vi.runAllTimers();
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(timestamps).toHaveLength(total);
+    const gaps = timestamps.slice(1).map((t, i) => t - (timestamps[i] ?? t));
+    expect(gaps.every((g) => g === 4200)).toBe(true); // unscaled excerpt dwell throughout
+
+    // 59 excerpt gaps of 4200ms = 247,800ms, well past the 180s cap.
+    // Excerpt dwells never shrink, so an all-excerpt bundle legitimately
+    // runs long — that's the guard's intended behavior, not a bug.
+    const totalDuration = (timestamps[timestamps.length - 1] ?? start) - start;
+    expect(totalDuration).toBeGreaterThan(180_000);
+    vi.useRealTimers();
+  });
+
   it("round-trip all 10 PublicEventKinds preserves summary fidelity via reduce", () => {
     vi.useFakeTimers();
     // Use exact reducer-generated summaries from classify() in reduce.ts

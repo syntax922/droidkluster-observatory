@@ -52,6 +52,10 @@ function buildExcerptsByPr(events: PublicEvent[]): Map<number, Map<string, strin
   for (const e of events) {
     if (e.pr === undefined || e.excerpt === undefined) continue;
     const forPr = byPr.get(e.pr) ?? new Map<string, string>();
+    // `at` is second-precision, so two same-kind excerpts landing in the
+    // same second on the same PR would collide here (last one wins). Only
+    // review_posted carries an excerpt today, and only one reviewer posts
+    // per PR at a time, so that collision doesn't happen in practice.
     forPr.set(`${e.kind}|${e.at}`, e.excerpt);
     byPr.set(e.pr, forPr);
   }
@@ -131,12 +135,16 @@ startDmd({ root: els.stations, getBoard: () => lastBoard });
 startPolling({
   base: DATA_BASE,
   intervalMs: POLL_MS,
-  onSnapshot: (snap) => {
+  onSnapshot: async (snap) => {
     const mode = decideMode(snap, Date.now());
     if (mode === "live") {
       replay.exit();
+      // Same-edge and fast: resolve the feed (and its excerpts) before
+      // painting, so a newly-arrived excerpt-bearing hop renders its quote
+      // card on this snapshot instead of waiting for the next ~20s poll.
+      // The catch keeps a feed failure from blocking the board render.
+      await refreshTickerFromFeed().catch(() => {});
       renderLive(snap);
-      void refreshTickerFromFeed();
     } else if (mode === "stale") {
       replay.exit();
       renderHonesty(els.honesty, {
