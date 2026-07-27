@@ -8,16 +8,35 @@ export interface BoardView {
   mode: BoardMode;
   droids: DroidStatus[];
   celebrating: boolean;
+  // The wall-clock (or replay-equivalent) time this board was rendered at.
+  // Used to derive the "cooling" afterglow window against each droid's
+  // recorded last_action_at — deliberately NOT the raf animation clock
+  // (dmdFrame's tMs), and NOT Date.now() read fresh here, so replay frames
+  // cool relative to the replayed snapshot's own generated_at rather than
+  // real wall time racing ahead of the story being replayed.
+  renderedAtMs: number;
 }
+
+// How long a droid's DMD keeps a visible afterglow after its last recorded
+// action before fading back to its plain standby signature.
+export const COOLING_MIN = 10;
 
 export function deriveDmdState(
   mode: BoardMode,
   droid: DroidStatus,
   celebrating: boolean,
+  nowMs: number,
 ): DmdState {
   if (mode === "stale") return "stale";
   if (celebrating) return "celebrate";
-  return droid.state === "active" ? "active" : "idle";
+  if (droid.state === "active") return "active";
+  if (mode === "live" || mode === "replay") {
+    if (droid.last_action_at !== undefined) {
+      const ageMin = (nowMs - Date.parse(droid.last_action_at)) / 60_000;
+      if (ageMin >= 0 && ageMin <= COOLING_MIN) return "cooling";
+    }
+  }
+  return "idle";
 }
 
 const TICK_MS = 66; // <=15fps
@@ -61,7 +80,7 @@ export function startDmd(opts: StartDmdOpts): () => void {
         droid,
         state: "idle" as const,
       };
-      const state = deriveDmdState(board.mode, status, board.celebrating);
+      const state = deriveDmdState(board.mode, status, board.celebrating, board.renderedAtMs);
       parts.push(`${droid}:${state}`);
       paint(el, dmdFrame(droid, state, t), ACCENTS[droid]);
     }

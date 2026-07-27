@@ -55,4 +55,23 @@ describe("toSnapshot", () => {
     const snap = toSnapshot(stateWithActiveReview(), new Date("2026-07-25T14:02:00Z"));
     expect((snap.chains[0] as Record<string, unknown>).events).toBeUndefined();
   });
+
+  it("carries last_action_at through from the reducer's idle transition", () => {
+    let s = stateWithActiveReview();
+    s = reduce(s, {
+      kind: "event",
+      id: "c",
+      subject: "gh.event.project.pull_request_review.submitted.5",
+      ts: "2026-07-25T14:05:00Z",
+      payload: {
+        action: "submitted",
+        review: { state: "approved" },
+        pull_request: { number: 5, head: { sha: "x" } },
+        repository: { full_name: "x/d" },
+      },
+    }).state;
+    const snap = toSnapshot(s, new Date("2026-07-25T14:06:00Z"));
+    const hk = snap.droids.find((d) => d.droid === "hk-47");
+    expect(hk?.last_action_at).toBe("2026-07-25T14:05:00Z");
+  });
 });
