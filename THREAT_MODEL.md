@@ -139,6 +139,34 @@ before it's written to the edge store:
   exhibit. The corpus and the two safety valves above carry the risk
   instead.
 
+## Bot management: a documented rejection and a substitution
+
+Controls on this site are chosen by threat fit, and one common control was
+evaluated and deliberately turned off.
+
+- **Cloudflare Bot Fight Mode: rejected.** It functions by injecting an
+  inline, per-request challenge script into every proxied page — which this
+  site's `script-src 'self'` CSP blocks unconditionally (the script varies
+  per request, so it cannot be hash-allowed). Keeping both means shipping a
+  visibly non-functional control and a console error on every page load;
+  making it function means weakening the CSP that actually maps to an
+  enumerated threat (the Pages-compromise blast radius). It also defends
+  nothing here: the surface is static and read-only, the data is public by
+  design, and there is nothing to brute-force. A control that traces to no
+  threat was removed rather than worn as decoration.
+- **AI-crawler blocking: adopted.** The owner does not consent to this
+  zone being harvested for AI training. That concern has a fitted control:
+  Cloudflare's server-side AI Scrapers and Crawlers block (edge
+  fingerprinting, no injected script, no CSP interaction), enabled
+  zone-wide, plus the explicit `robots.txt` policy this site serves
+  (search indexing welcome; `ai-train=no` content signal; named trainer
+  user-agents disallowed). Enforcement at the edge, stated consent for
+  compliant crawlers.
+- The observatory's own data remains the one deliberately public thing on
+  the zone: it is pre-sanitized so that anything recording it receives
+  only what was chosen for publication. The consent boundary protected
+  here is the rest of the zone, and the principle.
+
 ## Residual risks
 
 - **NATS subject naming is visible in public source (accepted).** The
