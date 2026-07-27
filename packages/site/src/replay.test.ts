@@ -1,6 +1,6 @@
 import type { CurrentSnapshot, PublicEvent, ReplayBundle } from "@observatory/core";
 import { describe, expect, it, vi } from "vitest";
-import { ReplayPlayer, pickCompression, replayLabel } from "./replay.js";
+import { ReplayPlayer, replayLabel } from "./replay.js";
 
 const bundle: ReplayBundle = {
   id: "pr-1607-2026-07-23",
@@ -27,32 +27,80 @@ const bundle: ReplayBundle = {
   ],
 };
 
-describe("replayLabel / pickCompression", () => {
-  it("labels with pr, date, compression", () => {
-    expect(replayLabel(bundle, 30)).toBe("REPLAY — PR #1607, 2026-07-23 (time ×30)");
-  });
-  it("targets ~90s playback", () => {
-    // 30 min span / 90s target = ×20
-    expect(pickCompression(bundle)).toBe(20);
+describe("replayLabel", () => {
+  it("labels with pr, captured date, and the humanized span of history", () => {
+    expect(replayLabel(bundle)).toBe("REPLAY — PR #1607 · 2026-07-23 · 30m of history");
   });
 });
 
 describe("ReplayPlayer", () => {
-  it("emits one frame per event, in order, on the compressed clock", () => {
+  it("emits one frame per event, in order, spaced by each event's dwell", () => {
     vi.useFakeTimers();
     const frames: string[] = [];
     const onDone = vi.fn();
     const player = new ReplayPlayer(bundle, {
-      compression: 20,
-      onFrame: (snap, feed) => frames.push(feed[feed.length - 1]?.summary ?? ""),
+      onFrame: (_snap, feed) => frames.push(feed[feed.length - 1]?.summary ?? ""),
       onDone,
     });
     player.start();
     expect(frames).toHaveLength(1); // first event fires immediately
-    vi.advanceTimersByTime(90_000); // 30 real minutes / ×20 = 90s
+    vi.advanceTimersByTime(1599); // just short of the base dwell (1600ms)
+    expect(frames).toHaveLength(1);
+    vi.advanceTimersByTime(1);
     expect(frames).toHaveLength(2);
     expect(frames[1]).toContain("APPROVED");
     expect(onDone).toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("an event carrying an excerpt holds the screen for the longer excerpt dwell", () => {
+    vi.useFakeTimers();
+    const excerptBundle: ReplayBundle = {
+      id: "excerpt-bundle",
+      title: "t",
+      captured_on: "2026-07-25",
+      pr: 99,
+      events: [
+        {
+          id: "a",
+          at: "2026-07-25T00:00:00Z",
+          droid: "system",
+          kind: "pr_opened",
+          pr: 99,
+          summary: "PR #99 opened",
+        },
+        {
+          id: "b",
+          at: "2026-07-25T00:01:00Z",
+          droid: "hk-47",
+          kind: "review_posted",
+          pr: 99,
+          summary: "review APPROVED · PR #99",
+          excerpt: "Looks solid, nice work — clean separation and good test coverage throughout.",
+        },
+        {
+          id: "c",
+          at: "2026-07-25T00:02:00Z",
+          droid: "system",
+          kind: "pr_merged",
+          pr: 99,
+          summary: "PR #99 merged",
+        },
+      ],
+    };
+    const frames: string[] = [];
+    const player = new ReplayPlayer(excerptBundle, {
+      onFrame: (_snap, feed) => frames.push(feed[feed.length - 1]?.summary ?? ""),
+      onDone: () => {},
+    });
+    player.start();
+    expect(frames).toHaveLength(1); // pr_opened shown immediately
+    vi.advanceTimersByTime(1600); // pr_opened's base dwell elapses
+    expect(frames).toHaveLength(2); // the excerpt-bearing review is now current
+    vi.advanceTimersByTime(4199); // just short of the excerpt dwell
+    expect(frames).toHaveLength(2); // still holding — not the 1600/3000ms a non-excerpt event would use
+    vi.advanceTimersByTime(1); // completes the 4200ms excerpt dwell
+    expect(frames).toHaveLength(3);
     vi.useRealTimers();
   });
 
@@ -60,7 +108,6 @@ describe("ReplayPlayer", () => {
     vi.useFakeTimers();
     const frames: unknown[] = [];
     const player = new ReplayPlayer(bundle, {
-      compression: 20,
       onFrame: (s) => frames.push(s),
       onDone: () => {},
     });
@@ -76,8 +123,7 @@ describe("ReplayPlayer", () => {
     const frames: string[] = [];
     let playerRef: ReplayPlayer | null = null;
     const player = new ReplayPlayer(bundle, {
-      compression: 20,
-      onFrame: (snap, feed) => {
+      onFrame: (_snap, feed) => {
         frames.push(feed[feed.length - 1]?.summary ?? "");
         // Stop on first frame to test guard during callback
         if (frames.length === 1 && playerRef) {
@@ -92,6 +138,98 @@ describe("ReplayPlayer", () => {
     vi.advanceTimersByTime(200_000);
     expect(frames).toHaveLength(1); // no further frames after stop
     expect(player.pendingTimerCount()).toBe(0); // no timers remain
+    vi.useRealTimers();
+  });
+
+  it("scales non-excerpt dwells to the playback cap, flooring at 700ms, while excerpt dwells never shrink", () => {
+    vi.useFakeTimers();
+    const total = 260;
+    const excerptEvery = 26; // 10 excerpt-bearing events out of 260
+    const events: PublicEvent[] = Array.from({ length: total }, (_, i) => ({
+      id: `s${i}`,
+      at: new Date(Date.parse("2026-07-25T00:00:00Z") + i * 60_000).toISOString(),
+      droid: i % 2 === 0 ? "system" : "hk-47",
+      kind: "check_run",
+      pr: 900,
+      summary: "CI passed (build) · PR #900",
+      ...(i % excerptEvery === 0
+        ? { excerpt: "A longer review comment that should not be rushed off screen." }
+        : {}),
+    }));
+    const bigBundle: ReplayBundle = {
+      id: "big",
+      title: "big bundle",
+      captured_on: "2026-07-25",
+      pr: 900,
+      events,
+    };
+
+    const timestamps: number[] = [];
+    const onDone = vi.fn();
+    const player = new ReplayPlayer(bigBundle, {
+      onFrame: () => timestamps.push(Date.now()),
+      onDone,
+    });
+    const start = Date.now();
+    player.start();
+    vi.runAllTimers();
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(timestamps).toHaveLength(total);
+
+    const gaps = timestamps.slice(1).map((t, i) => t - (timestamps[i] ?? t));
+    const distinctGaps = new Set(gaps);
+    for (const g of distinctGaps) expect([700, 4200]).toContain(g);
+    expect(distinctGaps.has(700)).toBe(true); // the floor actually engaged
+
+    const excerptCount = events.filter((e) => e.excerpt).length;
+    const totalDuration = (timestamps[timestamps.length - 1] ?? start) - start;
+    // Loose bound: the non-excerpt portion is capped near MAX_PLAYBACK_MS
+    // (180s), and excerpt dwells are layered on top unscaled.
+    expect(totalDuration).toBeLessThanOrEqual(180_000 + excerptCount * 4200);
+    vi.useRealTimers();
+  });
+
+  it("an all-excerpt bundle never divides by zero (nonExcerptSum===0 guard) and leaves every dwell unscaled", () => {
+    vi.useFakeTimers();
+    const total = 60;
+    const events: PublicEvent[] = Array.from({ length: total }, (_, i) => ({
+      id: `x${i}`,
+      at: new Date(Date.parse("2026-07-25T00:00:00Z") + i * 60_000).toISOString(),
+      droid: "hk-47",
+      kind: "review_posted",
+      pr: 500,
+      summary: "review APPROVED · PR #500",
+      excerpt: "Every one of these carries prose, so nothing here should ever get scaled down.",
+    }));
+    const allExcerptBundle: ReplayBundle = {
+      id: "all-excerpt",
+      title: "all excerpt",
+      captured_on: "2026-07-25",
+      pr: 500,
+      events,
+    };
+
+    const timestamps: number[] = [];
+    const onDone = vi.fn();
+    const player = new ReplayPlayer(allExcerptBundle, {
+      onFrame: () => timestamps.push(Date.now()),
+      onDone,
+    });
+    const start = Date.now();
+    expect(() => player.start()).not.toThrow();
+    vi.runAllTimers();
+
+    expect(onDone).toHaveBeenCalledTimes(1);
+    expect(timestamps).toHaveLength(total);
+    const gaps = timestamps.slice(1).map((t, i) => t - (timestamps[i] ?? t));
+    expect(gaps.every((g) => g === 4200)).toBe(true); // unscaled excerpt dwell throughout
+
+    // 59 excerpt gaps of 4200ms = 247,800ms, well past the 180s cap.
+    // Excerpt dwells never shrink, so an all-excerpt bundle legitimately
+    // runs long — that's the guard's intended behavior, not a bug.
+    const totalDuration = (timestamps[timestamps.length - 1] ?? start) - start;
+    expect(totalDuration).toBeGreaterThan(180_000);
     vi.useRealTimers();
   });
 
@@ -217,7 +355,6 @@ describe("ReplayPlayer", () => {
     const snapshots: CurrentSnapshot[] = [];
     const feeds: Array<{ feed: typeof allEvents; snap: CurrentSnapshot }> = [];
     const player = new ReplayPlayer(testBundle, {
-      compression: 1000,
       onFrame: (snap: CurrentSnapshot, feed) => {
         snapshots.push(snap);
         feeds.push({ feed, snap });
@@ -226,8 +363,9 @@ describe("ReplayPlayer", () => {
     });
     player.start();
     expect(snapshots).toHaveLength(1); // first event fires immediately
-    // Events span 12 minutes (e1 00:00:00 to k13 00:12:00 = 720 seconds), divided by compression (1000) = 720ms
-    vi.advanceTimersByTime(800);
+    // 12 base-dwell (1600ms) hops + 1 pr_merged hop (3000ms) between the 13
+    // events = 20,600ms of dwell to walk through the whole chain.
+    vi.advanceTimersByTime(21_000);
     expect(snapshots).toHaveLength(13);
     // Assert against chain hops (reducer output) for original 10 pr-bearing kinds
     const finalSnap = snapshots[snapshots.length - 1];

@@ -179,7 +179,6 @@ describe("createReplayController", () => {
       (
         _b: ReplayBundle,
         opts: {
-          compression: number;
           onFrame: (snap: CurrentSnapshot, feed: PublicEvent[], label: string) => void;
           onDone: () => void;
         },
