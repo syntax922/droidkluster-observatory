@@ -51,7 +51,10 @@ source stay private. This repo is public code, private deployment.
 
 Each station displays a **per-station dot-matrix state display (DMD)**: pure deterministic
 frame functions (64×32, unit-tested per frame) that render active/idle/stale/celebrate
-states using reduced-motion-aware glyphs and per-droid accent colors.
+states using reduced-motion-aware glyphs and per-droid accent colors. Idle stations show
+per-droid standby signatures rather than one shared anonymous animation, and a droid that
+recently acted visibly cools for ~10 minutes afterward — driven by a recorded
+`last_action_at` timestamp, not animation guesswork.
 
 Each droid carries an **abstracted specification — the contract the agent runs under**,
 not its prompt. The specification details what events the agent observes, what invariants

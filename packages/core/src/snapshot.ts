@@ -20,6 +20,7 @@ export function toSnapshot(state: FleetState, now: Date): CurrentSnapshot {
       ...(active && d.task ? { task: d.task } : {}),
       ...(active && d.since ? { since: d.since } : {}),
       ...(d.last_action ? { last_action: d.last_action } : {}),
+      ...(d.last_action_at ? { last_action_at: d.last_action_at } : {}),
     };
   });
 

@@ -33,6 +33,34 @@ describe("CurrentSnapshotSchema", () => {
     };
     expect(CurrentSnapshotSchema.parse(snap).droids).toHaveLength(1);
   });
+  it("accepts last_action_at on a droid status", () => {
+    const snap = {
+      generated_at: "2026-07-25T14:00:00Z",
+      last_contact: "2026-07-25T14:00:00Z",
+      droids: [
+        {
+          droid: "tt-8l",
+          state: "idle",
+          last_action: "merge decision APPROVED on PR #5",
+          last_action_at: "2026-07-25T13:58:00Z",
+        },
+      ],
+      chains: [],
+    };
+    expect(CurrentSnapshotSchema.parse(snap).droids[0]?.last_action_at).toBe(
+      "2026-07-25T13:58:00Z",
+    );
+  });
+  it("still parses an OLD snapshot recorded before last_action_at existed (backward compat)", () => {
+    const snap = {
+      generated_at: "2026-07-25T14:00:00Z",
+      last_contact: "2026-07-25T14:00:00Z",
+      droids: [{ droid: "r5", state: "idle", last_action: "coder reworked · PR #9" }],
+      chains: [],
+    };
+    const parsed = CurrentSnapshotSchema.parse(snap);
+    expect(parsed.droids[0]?.last_action_at).toBeUndefined();
+  });
 });
 
 describe("ReplayBundleSchema", () => {
