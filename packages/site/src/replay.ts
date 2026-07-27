@@ -6,25 +6,62 @@ import {
   reduce,
   toSnapshot,
 } from "@observatory/core";
+import { spanLabel } from "./time.js";
 
-export function replayLabel(bundle: ReplayBundle, compression: number): string {
-  return `REPLAY — PR #${bundle.pr}, ${bundle.captured_on} (time ×${compression})`;
-}
-
-const TARGET_PLAYBACK_S = 90;
-
-export function pickCompression(bundle: ReplayBundle): number {
+export function replayLabel(bundle: ReplayBundle): string {
   const first = bundle.events[0];
   const last = bundle.events[bundle.events.length - 1];
-  if (!first || !last) return 10;
-  const spanS = Math.max(1, (Date.parse(last.at) - Date.parse(first.at)) / 1000);
-  return Math.min(600, Math.max(10, Math.round(spanS / TARGET_PLAYBACK_S)));
+  const span = first && last ? spanLabel(first.at, last.at) : "0s";
+  return `REPLAY — PR #${bundle.pr} · ${bundle.captured_on} · ${span} of history`;
 }
 
 export interface ReplayOpts {
-  compression: number;
   onFrame: (snap: CurrentSnapshot, feed: PublicEvent[], label: string) => void;
   onDone: () => void;
+}
+
+// Per-event dwell: how long an event stays "current" before the next one
+// fires. This replaces real-time compression — a fleet event stream's actual
+// cadence (seconds to hours between hops) has no relationship to how long a
+// person needs to read what happened, so pacing is keyed to comprehension
+// (a beat per event, longer for prose, longer still for a PR landing) rather
+// than to the wall-clock gap between the original events.
+const BASE_DWELL_MS = 1600;
+const EXCERPT_DWELL_MS = 4200;
+const MERGE_DWELL_MS = 3000;
+const MAX_PLAYBACK_MS = 180_000;
+const MIN_DWELL_MS = 700;
+
+function baseDwellFor(event: PublicEvent): number {
+  if (event.excerpt) return EXCERPT_DWELL_MS;
+  if (event.kind === "pr_merged" || event.kind === "pr_closed") return MERGE_DWELL_MS;
+  return BASE_DWELL_MS;
+}
+
+// Scales dwells down so a long bundle still finishes inside MAX_PLAYBACK_MS,
+// but never shrinks an excerpt's reading time below EXCERPT_DWELL_MS — a
+// wall of review prose flashed for 700ms would be worse than a replay that
+// runs a little long. Non-excerpt dwells absorb the whole cut, floored at
+// MIN_DWELL_MS so even a very long bundle keeps individual beats legible.
+function scheduleDwells(events: PublicEvent[]): number[] {
+  const raw = events.map(baseDwellFor);
+  const total = raw.reduce((sum, d) => sum + d, 0);
+  if (total <= MAX_PLAYBACK_MS) return raw;
+
+  let excerptSum = 0;
+  let nonExcerptSum = 0;
+  events.forEach((e, i) => {
+    const dwell = raw[i] as number;
+    if (e.excerpt) excerptSum += dwell;
+    else nonExcerptSum += dwell;
+  });
+  const budget = Math.max(0, MAX_PLAYBACK_MS - excerptSum);
+  const scale = nonExcerptSum > 0 ? budget / nonExcerptSum : 1;
+
+  return events.map((e, i) => {
+    const dwell = raw[i] as number;
+    return e.excerpt ? dwell : Math.max(MIN_DWELL_MS, Math.round(dwell * scale));
+  });
 }
 
 // Replays run each bundle event through the SAME reducer the projector uses,
@@ -43,30 +80,33 @@ export class ReplayPlayer {
   start(): void {
     const state = emptyFleetState();
     const feed: PublicEvent[] = [];
-    const label = replayLabel(this.bundle, this.opts.compression);
-    const t0 = Date.parse(this.bundle.events[0]?.at ?? new Date(0).toISOString());
+    const label = replayLabel(this.bundle);
+    const dwells = scheduleDwells(this.bundle.events);
+    const events = this.bundle.events;
 
-    this.bundle.events.forEach((event, i) => {
-      const delayMs = Math.trunc((Date.parse(event.at) - t0) / this.opts.compression);
-      const fire = (): void => {
-        if (this.stopped) return;
-        reduce(state, {
-          kind: "event",
-          id: `replay-${event.id}`,
-          subject: syntheticSubject(event),
-          ts: event.at,
-          payload: syntheticPayload(event),
-        });
-        feed.push(event);
-        this.opts.onFrame(toSnapshot(state, new Date(event.at)), feed, label);
-        if (i === this.bundle.events.length - 1) this.opts.onDone();
-      };
-      if (delayMs <= 0) {
-        if (!this.stopped) fire();
-      } else {
-        if (!this.stopped) this.timers.push(setTimeout(fire, delayMs));
+    const fire = (i: number): void => {
+      if (this.stopped) return;
+      const event = events[i];
+      if (!event) return;
+      reduce(state, {
+        kind: "event",
+        id: `replay-${event.id}`,
+        subject: syntheticSubject(event),
+        ts: event.at,
+        payload: syntheticPayload(event),
+      });
+      feed.push(event);
+      this.opts.onFrame(toSnapshot(state, new Date(event.at)), feed, label);
+      if (this.stopped) return; // onFrame may call stop() synchronously mid-loop
+      if (i === events.length - 1) {
+        this.opts.onDone();
+        return;
       }
-    });
+      const dwell = dwells[i] ?? BASE_DWELL_MS;
+      this.timers.push(setTimeout(() => fire(i + 1), dwell));
+    };
+
+    fire(0);
   }
 
   stop(): void {
