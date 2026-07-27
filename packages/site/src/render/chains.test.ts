@@ -291,6 +291,58 @@ describe("renderChains — consecutive-CI batching", () => {
     expect(el.textContent).toContain("CI red (test-unit)");
     expect(el.querySelector(".tl-label")?.textContent).not.toContain("CI checks");
   });
+
+  it("splits a run at an internal gap > 10min instead of swallowing the gap row", () => {
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        checkRunHop("2026-07-25T13:00:00Z", "CI skipped (a) · PR #42"),
+        checkRunHop("2026-07-25T13:05:00Z", "CI skipped (b) · PR #42"),
+        checkRunHop("2026-07-25T13:30:00Z", "CI skipped (c) · PR #42"),
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    // The 25min gap between the 2nd and 3rd hop splits the run: [a,b] is
+    // below the batch threshold (2 < 3) so both render unbatched, and c
+    // renders as its own single hop — 3 rows total, with a gap row between
+    // the 2nd and 3rd.
+    const rows = el.querySelectorAll(".tl-row");
+    expect(rows).toHaveLength(3);
+    expect(el.querySelectorAll(".tl-label")[0]?.textContent).not.toContain("CI checks");
+    const gap = el.querySelector(".tl-gap");
+    expect(gap).not.toBeNull();
+    expect(gap?.textContent).toContain("25m later");
+  });
+
+  it("a gap between two 3+ runs renders two batch rows with the gap row between", () => {
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        checkRunHop("2026-07-25T13:00:00Z", "CI skipped (a) · PR #42"),
+        checkRunHop("2026-07-25T13:00:01Z", "CI skipped (b) · PR #42"),
+        checkRunHop("2026-07-25T13:00:02Z", "CI skipped (c) · PR #42"),
+        checkRunHop("2026-07-25T13:30:00Z", "CI cancelled (d) · PR #42"),
+        checkRunHop("2026-07-25T13:30:01Z", "CI cancelled (e) · PR #42"),
+        checkRunHop("2026-07-25T13:30:02Z", "CI cancelled (f) · PR #42"),
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    const rows = el.querySelectorAll(".tl-row");
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.querySelector(".tl-label")?.textContent).toBe("3 CI checks · 3 skipped");
+    expect(rows[1]?.querySelector(".tl-label")?.textContent).toBe("3 CI checks · 3 cancelled");
+    const gap = el.querySelector(".tl-gap");
+    expect(gap).not.toBeNull();
+    expect(gap?.textContent).toContain("later");
+  });
 });
 
 describe("renderChains — name de-dup", () => {
@@ -328,6 +380,48 @@ describe("renderChains — name de-dup", () => {
           droid: "hk-47",
           kind: "review_posted",
           label: "review CHANGES_REQUESTED · PR #1663",
+        },
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    const row = el.querySelector(".tl-row");
+    expect(row?.querySelector(".tl-droid")?.textContent).toBe("HK-47");
+  });
+
+  it("omits the tag case-insensitively (label 'copilot ...' vs registry name 'Copilot')", () => {
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        {
+          at: "2026-07-25T13:00:00Z",
+          droid: "copilot",
+          kind: "copilot_session_started",
+          label: "copilot session started · PR #42",
+        },
+      ],
+    };
+    const el = document.createElement("div");
+    renderChains(el, [c]);
+    const row = el.querySelector(".tl-row");
+    expect(row?.querySelector(".tl-droid")).toBeNull();
+  });
+
+  it("review_posted still keeps its tag (unaffected by the copilot case-insensitivity fix)", () => {
+    const c: Chain = {
+      pr: 42,
+      updated_at: "2026-07-25T14:00:00Z",
+      active: false,
+      complete: false,
+      hops: [
+        {
+          at: "2026-07-25T13:00:00Z",
+          droid: "hk-47",
+          kind: "review_posted",
+          label: "review CHANGES_REQUESTED · PR #42",
         },
       ],
     };

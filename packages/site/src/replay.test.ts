@@ -534,4 +534,47 @@ describe("ReplayPlayer", () => {
     expect(frameFeeds).toHaveLength(5);
     vi.useRealTimers();
   });
+
+  it("splits a run at an internal gap > 10min into independent beats, mirroring chains.ts", () => {
+    vi.useFakeTimers();
+    const checkRun = (id: string, at: string): PublicEvent => ({
+      id,
+      at,
+      droid: "system",
+      kind: "check_run",
+      pr: 42,
+      summary: `CI skipped (${id}) · PR #42`,
+    });
+    // Two runs of 3, separated by a 30min gap: each run independently meets
+    // the batch threshold, so this collapses to exactly 2 beats/frames, not
+    // 1 (which would silently swallow the gap) and not 6 (unbatched).
+    const gappyBundle: ReplayBundle = {
+      id: "gappy",
+      title: "gappy",
+      captured_on: "2026-07-25",
+      pr: 42,
+      events: [
+        checkRun("a1", "2026-07-25T00:00:00Z"),
+        checkRun("a2", "2026-07-25T00:00:01Z"),
+        checkRun("a3", "2026-07-25T00:00:02Z"),
+        checkRun("b1", "2026-07-25T00:30:02Z"),
+        checkRun("b2", "2026-07-25T00:30:03Z"),
+        checkRun("b3", "2026-07-25T00:30:04Z"),
+      ],
+    };
+    const frameFeeds: PublicEvent[][] = [];
+    const onDone = vi.fn();
+    const player = new ReplayPlayer(gappyBundle, {
+      onFrame: (_snap, feed) => frameFeeds.push([...feed]),
+      onDone,
+    });
+    player.start();
+    expect(frameFeeds).toHaveLength(1); // first beat (a1-a3) fires immediately
+    expect(frameFeeds[0]?.map((e) => e.id)).toEqual(["a1", "a2", "a3"]);
+    vi.advanceTimersByTime(1600); // one base dwell — the second beat's whole cost
+    expect(frameFeeds).toHaveLength(2);
+    expect(frameFeeds[1]?.map((e) => e.id)).toEqual(["a1", "a2", "a3", "b1", "b2", "b3"]);
+    expect(onDone).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
 });

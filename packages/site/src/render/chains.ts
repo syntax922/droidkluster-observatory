@@ -54,9 +54,9 @@ function summarizeConclusions(hops: ChainHop[]): string {
 }
 
 // A single hop, or a run of >= BATCH_MIN_RUN consecutive batchable check_run
-// hops collapsed for display. Grouping happens purely on array adjacency —
-// the underlying hops (and therefore engine/reducer state) are untouched;
-// this only changes how the timeline renders them.
+// hops collapsed for display. Grouping happens on array adjacency AND real
+// time proximity — the underlying hops (and therefore engine/reducer state)
+// are untouched; this only changes how the timeline renders them.
 type HopUnit = { kind: "hop"; hop: ChainHop } | { kind: "batch"; hops: ChainHop[] };
 
 function groupHopUnits(hops: ChainHop[]): HopUnit[] {
@@ -68,7 +68,16 @@ function groupHopUnits(hops: ChainHop[]): HopUnit[] {
       let j = i + 1;
       while (j < hops.length) {
         const next = hops[j];
+        const prev = hops[j - 1];
         if (!next || !isBatchableCheckRun(next)) break;
+        // A run only holds together while consecutive hops stay within the
+        // same gap threshold that governs the between-units .tl-gap row
+        // elsewhere in this file — otherwise a batch would silently swallow
+        // a quiet stretch a reader should see as a pause. Splitting here
+        // (rather than special-casing the batch renderer) means the run
+        // boundary itself produces the gap row for free, via the existing
+        // between-units gap check in buildTimeline.
+        if (prev && Date.parse(next.at) - Date.parse(prev.at) > GAP_THRESHOLD_MS) break;
         j++;
       }
       const run = hops.slice(i, j);
@@ -129,11 +138,15 @@ function buildHopRow(
   if (hop.droid !== "system") {
     const droidName = DROID_REGISTRY[hop.droid].name;
     // The label already carries attribution when it opens with the droid's
-    // own name (e.g. "HK-47 review started · PR #1663") — showing the .tl-droid
-    // tag on top of that repeats the name for no reason. Labels that don't
-    // lead with the name (e.g. "review CHANGES_REQUESTED · PR #1663") still
-    // need the tag as the only source of attribution.
-    if (!hop.label.startsWith(`${droidName} `)) {
+    // own name (e.g. "HK-47 review started · PR #1663", or lowercased as in
+    // "copilot session started · PR #42" against registry name "Copilot")
+    // — showing the .tl-droid tag on top of that repeats the name for no
+    // reason. Case-insensitive because reducer-authored labels don't always
+    // match the registry's display casing. Labels that don't lead with the
+    // name (e.g. "review CHANGES_REQUESTED · PR #1663") still need the tag
+    // as the only source of attribution.
+    const labelLeadsWithName = hop.label.toLowerCase().startsWith(`${droidName.toLowerCase()} `);
+    if (!labelLeadsWithName) {
       const droidTag = document.createElement("span");
       droidTag.className = "tl-droid";
       droidTag.style.color = accent;
