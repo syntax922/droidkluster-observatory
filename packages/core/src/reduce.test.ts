@@ -69,6 +69,7 @@ describe("reduce", () => {
     );
     expect(state.droids["hk-47"].task).toBeUndefined();
     expect(state.droids["hk-47"].last_action).toContain("CHANGES_REQUESTED");
+    expect(state.droids["hk-47"].last_action_at).toBe("2026-07-25T14:00:00Z");
     const posted = emitted.find((e) => e.kind === "review_posted");
     expect(posted?.excerpt).toBeDefined();
     expect(posted?.excerpt).not.toContain("/home/svc");
@@ -102,6 +103,7 @@ describe("reduce", () => {
       }),
     );
     expect(state.droids["tt-8l"].last_action).toContain("APPROVED");
+    expect(state.droids["tt-8l"].last_action_at).toBe("2026-07-25T14:00:00Z");
     expect(emitted[0]?.kind).toBe("merge_decision");
   });
 
@@ -161,6 +163,7 @@ describe("reduce", () => {
     );
     expect(state.droids.copilot.task).toBe("implementing on PR #1700");
     expect(state.droids["2-1b"].last_action).toContain("diagnosis delivered");
+    expect(state.droids["2-1b"].last_action_at).toBe("2026-07-25T14:00:00Z");
   });
 
   it("copilot_session ended idles copilot", () => {
@@ -170,6 +173,7 @@ describe("reduce", () => {
     );
     expect(state.droids.copilot.task).toBeUndefined();
     expect(state.droids.copilot.last_action).toContain("session ended");
+    expect(state.droids.copilot.last_action_at).toBe("2026-07-25T14:00:00Z");
   });
 
   it("review_requested emits a system hop", () => {
@@ -305,6 +309,7 @@ describe("R5 events", () => {
     });
     expect(state.droids.r5.task).toBeUndefined();
     expect(state.droids.r5.last_action).toBe("coder reworked · PR #9");
+    expect(state.droids.r5.last_action_at).toBe("2026-07-26T00:01:00Z");
     expect(emitted[0]).toMatchObject({ kind: "coder_completed", pr: 9 });
     expect(state.chains.get(9)?.hops.at(-1)?.label).toContain("coder reworked");
   });

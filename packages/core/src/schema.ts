@@ -50,6 +50,7 @@ export const DroidStatusSchema = z
     task: z.string().max(120).optional(),
     since: z.string().optional(),
     last_action: z.string().max(200).optional(),
+    last_action_at: z.string().optional(),
   })
   .strict();
 export type DroidStatus = z.infer<typeof DroidStatusSchema>;
