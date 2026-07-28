@@ -70,6 +70,14 @@ function isNotableBeat(firstEvent: PublicEvent): boolean {
   return firstEvent.summary.startsWith("CI red");
 }
 
+// The `event.droid === "system"` check is what actually keeps red
+// check_runs out of batches (a red check_run's summary alone is never
+// consulted here) — reduce.ts's classify() attributes a failing check_run
+// to droid "2-1b" and every other conclusion to droid "system" (see
+// reduce.ts's check_run branch). If that attribution ever changes, a red
+// check_run could start passing this predicate, silently entering a batch
+// and losing both its own notable-dwell extension and isNotableBeat's
+// "red breaks batching" assumption above.
 function isBatchableCheckRun(event: PublicEvent): boolean {
   return event.droid === "system" && event.kind === "check_run";
 }
