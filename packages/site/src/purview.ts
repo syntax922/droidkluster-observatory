@@ -80,7 +80,9 @@ export function derivePurview(
       }
     }
 
-    // tt-8l: latest review_posted is an APPROVED verdict with no later merge, within WINDOW.
+    // tt-8l: latest review_posted is an APPROVED verdict with no later merge (or
+    // re-review — a new review_started means the approval no longer covers the
+    // current head, so the queued-for-merge claim is stale), within WINDOW.
     const posted = lastHop(c, "review_posted");
     if (
       posted &&
@@ -89,7 +91,10 @@ export function derivePurview(
     ) {
       const hasLaterTerminal = c.hops
         .slice(posted.index + 1)
-        .some((h) => h.kind === "pr_merged" || h.kind === "merge_decision");
+        .some(
+          (h) =>
+            h.kind === "pr_merged" || h.kind === "merge_decision" || h.kind === "review_started",
+        );
       if (!hasLaterTerminal) tt8lEntries.push([c.pr, posted.hop.at]);
     }
   }

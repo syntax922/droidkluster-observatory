@@ -120,6 +120,20 @@ describe("tt-8l merge queue", () => {
     const p = derivePurview([c], [], T0);
     expect(p["tt-8l"].prs).toEqual([]);
   });
+  it("a re-review revokes tt-8l's queued claim", () => {
+    const p = derivePurview(
+      [
+        chain(301, [
+          [iso(20), "hk-47", "review_posted"],
+          [iso(5), "hk-47", "review_started"],
+        ]),
+      ],
+      [],
+      T0,
+    );
+    expect(p["hk-47"].prs).toEqual([301]);
+    expect(p["tt-8l"].prs).toEqual([]);
+  });
 });
 
 describe("r5 dispatch pairs (feed)", () => {
