@@ -124,6 +124,11 @@ function scheduleDwells(beats: Beat[]): number[] {
   });
 }
 
+// The replay round-trip is self-contained (we synthesize subjects and
+// immediately reduce them), so the token never needs to be a real repo
+// name — and the browser bundle stays private-name-free.
+const REPLAY_REPO = "project";
+
 // Replays run each bundle event through the SAME reducer the projector uses,
 // so the board renders replayed state with zero replay-specific render code.
 export class ReplayPlayer {
@@ -153,13 +158,17 @@ export class ReplayPlayer {
       // joins the feed — a batch changes how many times onFrame paints, not
       // what state/feed accumulate. Only the final event's frame is shown.
       for (const event of beat.events) {
-        reduce(state, {
-          kind: "event",
-          id: `replay-${event.id}`,
-          subject: syntheticSubject(event),
-          ts: event.at,
-          payload: syntheticPayload(event),
-        });
+        reduce(
+          state,
+          {
+            kind: "event",
+            id: `replay-${event.id}`,
+            subject: syntheticSubject(event),
+            ts: event.at,
+            payload: syntheticPayload(event),
+          },
+          { repo: REPLAY_REPO },
+        );
         feed.push(event);
         lastEvent = event;
       }
@@ -198,28 +207,29 @@ function syntheticSubject(e: PublicEvent): string {
       // classify()) — sniff the summary the same way syntheticPayload does,
       // since PublicEvent carries no separate `reopen` flag on the wire.
       return e.summary.endsWith("reopened")
-        ? `gh.event.dungeonadventures.pr.reopened.${e.pr}`
-        : `gh.event.dungeonadventures.pr.opened.${e.pr}`;
+        ? `gh.event.${REPLAY_REPO}.pr.reopened.${e.pr}`
+        : `gh.event.${REPLAY_REPO}.pr.opened.${e.pr}`;
     case "review_requested":
-      return `gh.event.dungeonadventures.pr.review_requested.${e.pr}`;
+      return `gh.event.${REPLAY_REPO}.pr.review_requested.${e.pr}`;
     case "review_started":
-      return `gh.event.dungeonadventures.pr.review_started.${e.pr}`;
+      return `gh.event.${REPLAY_REPO}.pr.review_started.${e.pr}`;
     case "review_posted":
-      return `gh.event.dungeonadventures.pull_request_review.submitted.${e.pr}`;
+      return `gh.event.${REPLAY_REPO}.pull_request_review.submitted.${e.pr}`;
     case "check_run":
-      return `gh.event.dungeonadventures.check_run.completed.${e.pr}`;
+      return `gh.event.${REPLAY_REPO}.check_run.completed.${e.pr}`;
     case "copilot_session_started":
-      return `gh.event.dungeonadventures.copilot_session.started.${e.pr}`;
+      return `gh.event.${REPLAY_REPO}.copilot_session.started.${e.pr}`;
     case "copilot_session_ended":
-      return `gh.event.dungeonadventures.copilot_session.ended.${e.pr}`;
+      return `gh.event.${REPLAY_REPO}.copilot_session.ended.${e.pr}`;
     case "merge_decision":
-      return `dungeonadventures.event.merge_decision.reached.${e.pr}`;
+      return `${REPLAY_REPO}.event.merge_decision.reached.${e.pr}`;
     case "pr_merged":
     case "pr_closed":
-      return `gh.event.dungeonadventures.pr.closed.${e.pr}`;
+      return `gh.event.${REPLAY_REPO}.pr.closed.${e.pr}`;
     case "issue_dispatched":
-      return `gh.event.dungeonadventures.issue.dispatched.${e.issue ?? 0}`;
+      return `gh.event.${REPLAY_REPO}.issue.dispatched.${e.issue ?? 0}`;
     case "coder_completed":
+      // brand — unchanged (droidkluster is the public brand, not the private repo token)
       return `droidkluster.event.coder.completed.replay-${e.id}`;
   }
 }

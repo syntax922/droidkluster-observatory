@@ -5,12 +5,12 @@ const base = {
   NATS_SERVERS: "nats://n1:4222,nats://n2:4222",
   NATS_STREAM: "EVENTS",
   NATS_DURABLE: "observatory-projector",
-  NATS_FILTER_SUBJECTS:
-    "gh.event.dungeonadventures.>,dungeonadventures.event.merge_decision.reached.>",
+  NATS_FILTER_SUBJECTS: "gh.event.exampleproj.>,exampleproj.event.merge_decision.reached.>",
   R2_ACCOUNT_ID: "acct",
   R2_BUCKET: "observatory",
   R2_ACCESS_KEY_ID: "k",
   R2_SECRET_ACCESS_KEY: "s",
+  OBSERVATORY_SOURCE_REPO: "exampleproj",
 };
 
 describe("readConfig", () => {
@@ -46,6 +46,18 @@ describe("readConfig", () => {
   it("filters empty entries from a trailing-comma NATS_SERVERS", () => {
     const cfg = readConfig({ ...base, NATS_SERVERS: "nats://n1:4222," });
     expect(cfg.natsServers).toEqual(["nats://n1:4222"]);
+  });
+  it("throws on missing OBSERVATORY_SOURCE_REPO", () => {
+    const { OBSERVATORY_SOURCE_REPO: _, ...rest } = base;
+    expect(() => readConfig(rest)).toThrow(/required env var OBSERVATORY_SOURCE_REPO not set/);
+  });
+  it("OBSERVATORY_REDACT_TERMS defaults to an empty array when unset", () => {
+    const cfg = readConfig(base);
+    expect(cfg.redactTerms).toEqual([]);
+  });
+  it("OBSERVATORY_REDACT_TERMS parses a trimmed, empty-filtered csv", () => {
+    const cfg = readConfig({ ...base, OBSERVATORY_REDACT_TERMS: "a, b ,,c" });
+    expect(cfg.redactTerms).toEqual(["a", "b", "c"]);
   });
 });
 

@@ -86,6 +86,8 @@ rather than degrading silently.
 | `PUSH_DEBOUNCE_MS` | `10000` | no | no | Defaults to `10000`. Coalescing window for on-event pushes to `current.json` / the day's feed. |
 | `PUSH_HEARTBEAT_MS` | `60000` | no | no | Defaults to `60000`. Interval for the `last_contact` heartbeat push even when idle. |
 | `OBSERVATORY_IGNORE_PRS` | `99999` | no | no | Defaults to `99999`, the fleet's synthetic canary PR. Comma-separated list of PR numbers filtered out of public artifacts at the `reduce()` boundary, before any droid-status/chain/feed mutation — a canary PR never flips a droid task, never opens a chain, and never appears in the feed. Throws on a non-integer entry. |
+| `OBSERVATORY_SOURCE_REPO` | `my-private-repo` | yes | no | Subject-token of the observed repo (`gh.event.<token>.*`). Value lives only in private cluster config — never committed, never present in public code or the browser bundle. |
+| `OBSERVATORY_REDACT_TERMS` | `my-private-repo,my-org` | no | no | Defaults to empty. Comma-separated list of literal private names replaced with `[project]` in all public prose (review excerpts, check-run names) at the `reduce()` boundary. Never include any string containing `droidkluster` — that's the public brand and stays visible by design. |
 
 ### The durable-consumer filter-change gotcha
 

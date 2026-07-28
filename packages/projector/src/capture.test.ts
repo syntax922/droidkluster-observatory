@@ -2,6 +2,8 @@ import { emptyFleetState, reduce } from "@observatory/core";
 import { describe, expect, it, vi } from "vitest";
 import { maybeCaptureChain } from "./capture.js";
 
+const OPTS = { repo: "exampleproj" };
+
 function mergedPrState() {
   let s = emptyFleetState();
   const mk = (subject: string, payload: unknown, id: string) =>
@@ -9,7 +11,7 @@ function mergedPrState() {
   s = reduce(
     s,
     mk(
-      "gh.event.dungeonadventures.pr.opened.9",
+      "gh.event.exampleproj.pr.opened.9",
       {
         action: "opened",
         pull_request: { number: 9, head: { sha: "x" } },
@@ -17,11 +19,12 @@ function mergedPrState() {
       },
       "e1",
     ),
+    OPTS,
   ).state;
   const r = reduce(
     s,
     mk(
-      "gh.event.dungeonadventures.pr.closed.9",
+      "gh.event.exampleproj.pr.closed.9",
       {
         action: "closed",
         pull_request: { number: 9, merged: true, head: { sha: "x" } },
@@ -29,6 +32,7 @@ function mergedPrState() {
       },
       "e2",
     ),
+    OPTS,
   );
   return { state: r.state, emitted: r.emitted };
 }
@@ -48,17 +52,21 @@ describe("maybeCaptureChain", () => {
 
   it("does nothing for non-terminal events", async () => {
     const s = emptyFleetState();
-    const r = reduce(s, {
-      kind: "event",
-      id: "a",
-      subject: "gh.event.dungeonadventures.pr.opened.9",
-      ts: "2026-07-25T14:00:00Z",
-      payload: {
-        action: "opened",
-        pull_request: { number: 9, head: { sha: "x" } },
-        repository: { full_name: "x/d" },
+    const r = reduce(
+      s,
+      {
+        kind: "event",
+        id: "a",
+        subject: "gh.event.exampleproj.pr.opened.9",
+        ts: "2026-07-25T14:00:00Z",
+        payload: {
+          action: "opened",
+          pull_request: { number: 9, head: { sha: "x" } },
+          repository: { full_name: "x/d" },
+        },
       },
-    });
+      OPTS,
+    );
     const writer = { putJson: vi.fn(), getJson: vi.fn() };
     await maybeCaptureChain(r.state, r.emitted, writer as never, () => {});
     expect(writer.putJson).not.toHaveBeenCalled();
