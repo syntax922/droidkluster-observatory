@@ -88,7 +88,7 @@ function staleFrame(tMs: number): Frame {
   return f;
 }
 
-function celebrateFrame(tMs: number): Frame {
+export function celebrateFrame(tMs: number): Frame {
   const f = blank();
   const cx = DMD_W / 2;
   const cy = DMD_H / 2;
@@ -196,19 +196,130 @@ activeGlyphs["hk-47"] = (t, counts) => {
   return f;
 };
 
-// 2-1b — diagnosing: ECG trace scrolling right-to-left with a QRS spike.
-activeGlyphs["2-1b"] = (t) => {
-  const f = blank();
-  const offset = Math.floor(t / 50) % DMD_W;
+// 2-1b — the ECG glyph family: a real PQRST waveform in every state, an
+// AFib rhythm whenever something's amiss, always-AFib while actively
+// diagnosing (that only happens because something failed). Shared by
+// standby (resting sinus), domain (sinus/AFib on unresolved CI red — see
+// Task 1's derivePurview()["2-1b"].secondary), and active (always AFib).
+
+// One full PQRST complex, ~16px wide starting at xOrigin (wrapped into the
+// board so a complex scrolling near the edge continues on the opposite
+// side rather than clipping). `opts.v` is the bulk intensity for every
+// segment except the R-wave apex, which gets `opts.tipV` — the ≤2px v=3
+// accent domain/active budget in the module-level comment block refers to.
+// The PR and ST segments are intentionally flat (no px calls): the
+// baseline hline every caller draws already covers them.
+function drawPqrst(
+  f: Frame,
+  xOrigin: number,
+  baselineY: number,
+  opts: { v: number; tipV: number },
+): void {
+  const { v, tipV } = opts;
+  const put = (dx: number, dy: number, intensity: number) =>
+    px(f, wrapX(xOrigin + dx), baselineY + dy, intensity);
+  // P wave: a small ascending bump. dx=1's peak at baseline-2 is also the
+  // sinus/AFib discriminator used by the test suite — AFib's fibrillatory
+  // jitter is contractually only ±1px, so it can never land here.
+  put(0, -1, v);
+  put(1, -2, v);
+  // dx 2-3: flat PR segment (baseline hline covers it).
+  put(4, 1, v); // Q dip
+  // R spike: upstroke/downstroke at bulk v; the apex (dx 6-7, 2px wide) is
+  // the tip accent, ~9px above baseline (within the 8-10px contract range).
+  put(5, -4, v);
+  put(6, -9, tipV);
+  put(7, -9, tipV);
+  put(8, -4, v);
+  put(9, 3, v); // S dip (upstroke to baseline)
+  put(10, 2, v); // S dip (continuing back toward baseline)
+  // dx 11: flat ST segment (baseline hline covers it).
+  // T wave: a rounded 4px bump.
+  put(12, -1, v);
+  put(13, -2, v);
+  put(14, -2, v);
+  put(15, -1, v);
+}
+
+// AFib fibrillatory baseline: sparse ±1px jitter wavelets between
+// complexes. Seeded on `floor(x/2)` (texture varies every 2 columns) plus a
+// `floor(tMs/160)` time bucket (the ×97 spreads the bucket into a distinct
+// region of the seed space so nearby (x, bucket) pairs don't alias into the
+// same mulberry32 state) — deterministic per frame, changes ~6x/sec.
+function drawAfibWavelets(f: Frame, baselineY: number, tMs: number): void {
+  const bucket = Math.floor(tMs / 160);
   for (let x = 0; x < DMD_W; x++) {
-    const phase = (x + offset) % 32;
-    let y = 16;
-    if (phase === 12) y = 12;
-    else if (phase === 13) y = 4;
-    else if (phase === 14) y = 26;
-    else if (phase === 15) y = 16;
-    px(f, x, y, phase >= 12 && phase <= 15 ? 3 : 2);
+    const rand = mulberry32(Math.floor(x / 2) + bucket * 97);
+    const r = rand();
+    if (r < 0.35) px(f, x, baselineY - 1, 1);
+    else if (r < 0.7) px(f, x, baselineY + 1, 1);
   }
+}
+
+// One AFib complex: no P wave, just a narrow Q-R-S (the irregular timing
+// lives in the caller). `ampAdjust` varies the R-wave height ±2px from the
+// contract's 9px base, clamped to stay a legible spike. Tip is 2px wide
+// (x, x+1) at `tipV`, matching the same accent budget as the sinus R-tip.
+function drawAfibComplex(
+  f: Frame,
+  x: number,
+  baselineY: number,
+  v: number,
+  tipV: number,
+  ampAdjust: number,
+): void {
+  const h = clamp(9 + ampAdjust, 6, 12);
+  const put = (dx: number, dy: number, intensity: number) =>
+    px(f, wrapX(x + dx), baselineY + dy, intensity);
+  put(-2, 1, v); // Q
+  put(-1, -4, v); // R upstroke
+  put(0, -h, tipV); // R tip
+  put(1, -h, tipV); // R tip (2nd px)
+  put(2, -4, v); // R downstroke
+  put(3, 2, v); // S
+}
+
+// Shared AFib renderer, parameterized by the caller's intensity budget.
+// Complex positions come from a mulberry32 stream seeded on a "sweep-index
+// bucket" (one full board-width scroll at the same 80ms/px rate the sinus
+// trace uses = 5120ms/sweep) — bit-stable for any tMs within a sweep, but a
+// fresh irregular layout each sweep. Beat count still scales with
+// clamp(primary, 1, 6) so CI load stays legible even in AFib. The same rand
+// stream also drives each beat's R-amplitude jitter ("from the same
+// stream", per the waveform contract), so gaps and amplitudes are both
+// deterministic in (tMs, beats) without a second seed to keep in sync.
+function drawAfib(
+  f: Frame,
+  baselineY: number,
+  tMs: number,
+  beats: number,
+  v: number,
+  tipV: number,
+): void {
+  drawAfibWavelets(f, baselineY, tMs);
+  const sweepMs = 5120;
+  const sweepIdx = Math.floor(tMs / sweepMs);
+  const rand = mulberry32(sweepIdx * 733 + beats * 31);
+  const base = DMD_W / beats;
+  const scroll = Math.floor(tMs / 80) % DMD_W;
+  for (let i = 0; i < beats; i++) {
+    const jitter = Math.round((rand() - 0.5) * base * 0.8);
+    const amp = Math.round((rand() - 0.5) * 4); // ±2px
+    const x = Math.round(base * (i + 0.5)) + jitter + scroll;
+    drawAfibComplex(f, x, baselineY, v, tipV, amp);
+  }
+}
+
+// 2-1b — active (diagnosing): ALWAYS AFib. Diagnosing only happens because
+// something failed, so there's no sinus-rhythm active state to render.
+// Full brightness bulk (2) with a v=3 tip — active's budget is otherwise
+// unrestricted, but a heavier bulk would crowd the trace past readability.
+activeGlyphs["2-1b"] = (t, counts) => {
+  const f = blank();
+  const baselineY = 16;
+  hline(f, 0, DMD_W - 1, baselineY, 1);
+  const beats = clamp(counts.primary, 1, 6);
+  drawAfib(f, baselineY, t, beats, 2, 3);
   return f;
 };
 
@@ -344,24 +455,27 @@ activeGlyphs.copilot = (t) => {
   return f;
 };
 
-// 2-1b — domain: load-scaled ECG. One QRS complex per active CI job
-// (clamped 1-6), evenly spaced and scrolling with the trace, baselined a
-// row above the active glyph's so the two read as distinct instruments.
-// Each beat's spike tip is exactly 2px at full intensity — the bulk of the
-// waveform stays at 2, keeping domain scenes readably dimmer than active.
+// 2-1b — domain: load-scaled ECG, sinus or AFib depending on whether CI is
+// amiss. One full PQRST complex per active CI job (clamped 1-6), evenly
+// spaced and scrolling with the trace, baselined a row above the active
+// glyph's so the two read as distinct instruments. `amiss` (unresolved-red
+// count on an incomplete chain — Task 1's derivePurview()["2-1b"].secondary)
+// switches sinus to AFib at the same intensity budget: bulk stays at 2, the
+// R-tip accent stays a ≤2px v=3 per beat.
 domainGlyphs["2-1b"] = (t, counts) => {
   const f = blank();
-  hline(f, 0, DMD_W - 1, 12, 1);
-  const beats = Math.max(1, Math.min(6, counts.primary));
-  const scroll = Math.floor(t / 80) % DMD_W;
-  for (let i = 0; i < beats; i++) {
-    const cx = Math.floor(((i + 0.5) * DMD_W) / beats) + scroll;
-    px(f, wrapX(cx - 2), 8, 2);
-    px(f, wrapX(cx - 1), 4, 2);
-    px(f, wrapX(cx), 4, 3);
-    px(f, wrapX(cx + 1), 4, 3);
-    px(f, wrapX(cx + 2), 20, 2);
-    px(f, wrapX(cx + 3), 12, 2);
+  const baselineY = 12;
+  hline(f, 0, DMD_W - 1, baselineY, 1);
+  const beats = clamp(counts.primary, 1, 6);
+  const amiss = counts.secondary > 0;
+  if (amiss) {
+    drawAfib(f, baselineY, t, beats, 2, 3);
+  } else {
+    const scroll = Math.floor(t / 80) % DMD_W;
+    for (let i = 0; i < beats; i++) {
+      const cx = Math.floor(((i + 0.5) * DMD_W) / beats) + scroll;
+      drawPqrst(f, cx - 6, baselineY, { v: 2, tipV: 3 });
+    }
   }
   return f;
 };
@@ -441,7 +555,7 @@ domainGlyphs["tt-8l"] = (t, counts) => {
 // wrap to the pad, and relaunch within a single 3s celebration. The caller
 // (dmd/controller.ts) is responsible for computing elapsedMs relative to the
 // celebration's actual start.
-function blastOffFrame(elapsedMs: number): Frame {
+export function blastOffFrame(elapsedMs: number): Frame {
   const f = blank();
   hline(f, 40, 60, 22, 1);
   const progress = clamp(elapsedMs, 0, 3000) / 3000;
@@ -454,6 +568,90 @@ function blastOffFrame(elapsedMs: number): Frame {
     const cx = 50 + i - Math.floor(cols / 2) + (Math.floor(rand() * 3) - 1);
     const len = 2 + Math.floor(rand() * 3);
     vline(f, cx, bodyBottom, Math.min(23, bodyBottom + len), 3);
+  }
+  return f;
+}
+
+// Bresenham line: plots every integer cell from (x0,y0) to (x1,y1) so each
+// step is Chebyshev-adjacent to the last — the continuity primitive
+// drawHeartRing uses to bridge consecutive curve samples. (Fix round 1:
+// the original heart ring plotted samples as isolated dots; at r≈8-12 the
+// cusp-heavy parametrization below spaces consecutive rounded samples more
+// than 1px apart on the flanks, so the outline fragmented into scatter
+// instead of reading as a closed shape. Bridging guarantees a connected
+// chain regardless of sample spacing or r.)
+function plotLine(f: Frame, x0: number, y0: number, x1: number, y1: number, v: number): void {
+  let x = x0;
+  let y = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    px(f, x, y, v);
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+}
+
+// 2-1b — celebrate override: a heart outline instead of the shared diamond
+// rings, using the classic parametric heart curve (x = 16·sin³t,
+// y = 13·cos t − 5·cos 2t − 2·cos 3t − cos 4t) scaled by r/16 — a real heart
+// silhouette (two lobes meeting a V taper to a bottom point) rather than a
+// hand-rolled arc approximation, so it reads unambiguously as a heart at
+// every ring size instead of only at the hand-tuned r≈8-12 sweet spot.
+// Exported so tests can render an isolated single ring (heartCelebrateFrame
+// always overlays two) for the continuity structural check.
+//
+// Fix round 1: sample density now scales with r (`8*r`, floor 48) so the
+// curve stays smooth as it grows, AND consecutive samples are bridged with
+// plotLine rather than plotted as isolated dots — density alone doesn't
+// guarantee adjacency after rounding to integer pixels (the cusps at the
+// top-center notch and the bottom point compress many samples into few
+// pixels while the flanks spread them out), so the outline needs the
+// explicit bridge to stay a single continuous chain at every r.
+export function drawHeartRing(f: Frame, cx: number, cy: number, r: number, v: number): void {
+  if (r <= 0) {
+    px(f, cx, cy, v);
+    return;
+  }
+  const scale = r / 16;
+  const steps = Math.max(48, 8 * r);
+  const point = (t: number): [number, number] => {
+    const hx = 16 * Math.sin(t) ** 3;
+    const hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+    // y is flipped (cy - hy·scale, not cy + hy·scale): the curve's +y is
+    // "up" (toward the lobes), but the DMD's y grows downward.
+    return [Math.round(cx + hx * scale), Math.round(cy - hy * scale)];
+  };
+  let [px0, py0] = point(0);
+  for (let i = 1; i <= steps; i++) {
+    const [px1, py1] = point((i / steps) * Math.PI * 2);
+    plotLine(f, px0, py0, px1, py1, v);
+    px0 = px1;
+    py0 = py1;
+  }
+}
+
+// Same two-phase expanding-ring cadence as celebrateFrame (growth on
+// `(tMs + phase) % 1600`, phases 0/800), but each ring is a heart outline
+// instead of a diamond.
+function heartCelebrateFrame(tMs: number): Frame {
+  const f = blank();
+  const cx = DMD_W / 2;
+  const cy = DMD_H / 2;
+  for (const phase of [0, 800]) {
+    const r = Math.floor((((tMs + phase) % 1600) / 1600) * 15);
+    drawHeartRing(f, cx, cy, r, 3);
   }
   return f;
 }
@@ -515,16 +713,17 @@ export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
     return f;
   },
 
-  // 2-1b — flat baseline (no QRS spike) with a single small blip crossing
-  // once per 5s, instead of the active trace's continuous scroll+spike.
-  // (Byte-identical to the pre-purview design — 2-1b's standby is up for a
-  // separate redesign; not touched here.)
+  // 2-1b — resting sinus: a single full PQRST complex sweeping the width
+  // once every 5s (replacing the old flat-baseline blip). Capped at v=2
+  // everywhere, including the R-tip — standby never gets the v=3 accent
+  // domain/active use.
   "2-1b": (t) => {
     const f = blank();
-    hline(f, 0, DMD_W - 1, 16, 1);
+    const baselineY = 16;
+    hline(f, 0, DMD_W - 1, baselineY, 1);
     const period = 5000;
-    const x = Math.floor(((t % period) / period) * DMD_W);
-    fillRect(f, x, 15, 3, 3, 2);
+    const xOrigin = Math.floor(((t % period) / period) * DMD_W);
+    drawPqrst(f, xOrigin, baselineY, { v: 2, tipV: 2 });
     return f;
   },
 
@@ -625,7 +824,11 @@ export function dmdFrame(
     case "stale":
       return staleFrame(tMs);
     case "celebrate":
-      return droid === "tt-8l" ? blastOffFrame(celebrateElapsedMs ?? 0) : celebrateFrame(tMs);
+      return droid === "tt-8l"
+        ? blastOffFrame(celebrateElapsedMs ?? 0)
+        : droid === "2-1b"
+          ? heartCelebrateFrame(tMs)
+          : celebrateFrame(tMs);
     case "active": {
       const glyph = activeGlyphs[droid];
       return glyph ? glyph(tMs, counts ?? { primary: 0, secondary: 0 }) : idleFrame(tMs);
