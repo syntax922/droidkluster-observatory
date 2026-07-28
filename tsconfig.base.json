@@ -9,7 +9,6 @@
     "declaration": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
-    "paths": { "@observatory/core": ["packages/core/src/index.ts"] }
+    "paths": { "@observatory/core": ["./packages/core/src/index.ts"] }
   }
 }
