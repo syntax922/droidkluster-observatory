@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { DMD_W, type Frame, blank } from "./frame.js";
-import { type DmdState, type GlyphCounts, dmdFrame, standbyGlyphs } from "./glyphs.js";
+import {
+  type DmdState,
+  type GlyphCounts,
+  blastOffFrame,
+  celebrateFrame,
+  dmdFrame,
+  standbyGlyphs,
+} from "./glyphs.js";
 
 const DROIDS = ["hk-47", "2-1b", "tt-8l", "ev-9d9", "r5", "copilot"] as const;
 
@@ -152,23 +159,143 @@ describe("domain", () => {
   });
 });
 
-describe("2-1b domain ECG", () => {
-  const dom = (n: number) => dmdFrame("2-1b", "domain", 400, { primary: n, secondary: 0 });
-  it("is deterministic and differs from active", () => {
-    expect(Array.from(dom(2))).toEqual(Array.from(dom(2)));
-    expect(Array.from(dom(2))).not.toEqual(Array.from(dmdFrame("2-1b", "active", 400)));
+// 2-1b's full PQRST glyph family (task 2 of the ECG plan): a real sinus
+// waveform (P-Q-R-S-T) in every state, an AFib rhythm (no P wave,
+// irregularly-irregular R-R, fibrillatory baseline jitter) whenever
+// counts.secondary > 0 (unresolved-red CI on an incomplete chain — see
+// Task 1's derivePurview()["2-1b"].secondary), and always-AFib for "active"
+// (diagnosing only happens because something failed). Supersedes the old
+// "2-1b domain ECG" block, which pinned the pre-redesign single-spike
+// morphology.
+describe("2-1b PQRST", () => {
+  const dom = (n: number, amiss = 0) =>
+    dmdFrame("2-1b", "domain", 480, { primary: n, secondary: amiss });
+  const DOMAIN_BASELINE_Y = 12;
+
+  // Shared R-column finder: only the R-spike tip reaches y<6 (P/Q/S/T never
+  // do, at either baseline used by 2-1b's states), so scanning for the
+  // topmost lit row per column and thresholding at 6 isolates R-tip columns.
+  // Adjacent columns within the same tip (drawPqrst/drawAfibComplex both
+  // draw 2px-wide tips) collapse to their first column so each beat counts
+  // once.
+  function rColumns(f: Frame): number[] {
+    const cols: number[] = [];
+    for (let x = 0; x < DMD_W; x++) {
+      let minY = 99;
+      for (let y = 0; y < 24; y++) if ((f[y * DMD_W + x] ?? 0) > 0) minY = Math.min(minY, y);
+      if (minY < 6) cols.push(x);
+    }
+    return cols.filter((x, i) => i === 0 || x - (cols[i - 1] as number) > 2);
+  }
+
+  // P-wave discriminator. drawPqrst's P wave peaks at baseline-2 (dx=1
+  // relative to the complex's xOrigin), 5 columns before the R-tip column
+  // (dx=6, the first of the tip's 2 tied columns that rColumns() keeps).
+  // AFib's fibrillatory baseline jitter is contractually only ±1px (see
+  // drawAfibWavelets), so it can never reach baseline-2 — a lit pixel
+  // exactly 2px above baseline, in the 4-column window ending 3 columns
+  // before an R-tip column, is provably a genuine P wave, not jitter noise.
+  function pRegionLit(f: Frame, rCol: number, baselineY: number): boolean {
+    const row = baselineY - 2;
+    for (let dx = -6; dx <= -3; dx++) {
+      const x = rCol + dx;
+      if (x >= 0 && x < DMD_W && (f[row * DMD_W + x] ?? 0) > 0) return true;
+    }
+    return false;
+  }
+
+  it("standby is a resting sinus: deterministic, ≤2, and no longer the flat-line blip", () => {
+    const a = dmdFrame("2-1b", "idle", 800);
+    expect(Array.from(a)).toEqual(Array.from(dmdFrame("2-1b", "idle", 800)));
+    expect(Math.max(...Array.from(a))).toBeLessThanOrEqual(2);
+    // A full-width flat baseline with a 3px block was the old blip; a sinus complex
+    // has pixels ABOVE baseline-1 (P/R/T) — assert some pixel above y=13 exists.
+    let above = 0;
+    for (let y = 0; y < 14; y++) for (let x = 0; x < 64; x++) if ((a[y * 64 + x] ?? 0) > 0) above++;
+    expect(above).toBeGreaterThan(0);
   });
-  it("beat count scales with CI load", () => {
-    // count v>=2 pixel clusters crossing the baseline band differs between 1 and 3 PRs
-    expect(Array.from(dom(1))).not.toEqual(Array.from(dom(3)));
+
+  it("sinus morphology has a P-wave bump before each R spike; AFib has none", () => {
+    const sinus = dom(2, 0) as Frame;
+    const afib = dom(2, 1) as Frame;
+    expect(Array.from(sinus)).not.toEqual(Array.from(afib));
+
+    const sinusRs = rColumns(sinus);
+    expect(sinusRs.length).toBeGreaterThanOrEqual(1);
+    for (const rCol of sinusRs) expect(pRegionLit(sinus, rCol, DOMAIN_BASELINE_Y)).toBe(true);
+
+    const afibRs = rColumns(afib);
+    expect(afibRs.length).toBeGreaterThanOrEqual(1);
+    for (const rCol of afibRs) expect(pRegionLit(afib, rCol, DOMAIN_BASELINE_Y)).toBe(false);
   });
-  it("domain caps at intensity 3 only on <=2px tips, bulk <=2", () => {
-    const f = dom(3);
-    const bright = f.filter((v) => v === 3).length;
-    expect(bright).toBeLessThanOrEqual(12); // tips only (<=2px per beat * 6 beats cap)
+
+  it("AFib R-R intervals are irregularly irregular; sinus intervals are equal", () => {
+    const sinusSpikes = rColumns(dom(3, 0) as Frame);
+    const afibSpikes = rColumns(dom(3, 1) as Frame);
+    expect(sinusSpikes.length).toBeGreaterThanOrEqual(2);
+    expect(afibSpikes.length).toBeGreaterThanOrEqual(2);
+    const gaps = (xs: number[]) => xs.slice(1).map((x, i) => x - (xs[i] as number));
+    const sg = gaps(sinusSpikes);
+    expect(new Set(sg).size).toBeLessThanOrEqual(2); // even spacing (±1 rounding)
+    const ag = gaps(afibSpikes);
+    expect(new Set(ag).size).toBe(ag.length); // pairwise distinct
   });
-  it("beat count clamps at 6 — primary=6 and primary=10 render identically", () => {
-    expect(Array.from(dom(6))).toEqual(Array.from(dom(10)));
+
+  it("active is AFib (diagnosing = something failed) and deterministic", () => {
+    const act = dmdFrame("2-1b", "active", 640, { primary: 1, secondary: 0 });
+    expect(Array.from(act)).toEqual(
+      Array.from(dmdFrame("2-1b", "active", 640, { primary: 1, secondary: 0 })),
+    );
+    expect(Array.from(act)).not.toEqual(Array.from(dom(1, 0))); // not the sinus render
+  });
+
+  it("domain intensity caps hold in BOTH rhythms", () => {
+    for (const amiss of [0, 1]) {
+      const f = dom(3, amiss);
+      expect(f.filter((v) => v === 3).length).toBeLessThanOrEqual(6); // ≤2px × 3 beats
+    }
+  });
+
+  it("ceiling clamp still holds in both rhythms", () => {
+    expect(Array.from(dom(6, 0))).toEqual(Array.from(dom(10, 0)));
+    expect(Array.from(dom(6, 1))).toEqual(Array.from(dom(10, 1)));
+  });
+
+  it("all 2-1b states stay in rows 0-23", () => {
+    for (const [state, counts] of [
+      ["idle", undefined],
+      ["domain", { primary: 3, secondary: 1 }],
+      ["active", { primary: 2, secondary: 2 }],
+    ] as const) {
+      const f = dmdFrame("2-1b", state as DmdState, 512, counts as GlyphCounts | undefined);
+      for (let y = 25; y < 32; y++) for (let x = 0; x < 64; x++) expect(f[y * 64 + x] ?? 0).toBe(0);
+    }
+  });
+
+  it("2-1b celebrate is the heart override, distinct from hk-47's diamond and tt-8l's blast-off", () => {
+    const heart = dmdFrame("2-1b", "celebrate", 900);
+    const diamond = dmdFrame("hk-47", "celebrate", 900);
+    const blast = dmdFrame("tt-8l", "celebrate", 900, undefined, 500);
+    expect(Array.from(heart)).not.toEqual(Array.from(diamond));
+    expect(Array.from(heart)).not.toEqual(Array.from(blast));
+  });
+
+  it("2-1b celebrate is deterministic", () => {
+    expect(Array.from(dmdFrame("2-1b", "celebrate", 1234))).toEqual(
+      Array.from(dmdFrame("2-1b", "celebrate", 1234)),
+    );
+  });
+
+  it("hk-47/ev-9d9 and tt-8l celebrate are unchanged by the 2-1b heart-override branch — pinned against the underlying renderers, which this task does not touch", () => {
+    for (const t of [0, 333, 900, 1600]) {
+      expect(Array.from(dmdFrame("hk-47", "celebrate", t))).toEqual(Array.from(celebrateFrame(t)));
+      expect(Array.from(dmdFrame("ev-9d9", "celebrate", t))).toEqual(Array.from(celebrateFrame(t)));
+    }
+    for (const elapsed of [0, 500, 1500, 2900]) {
+      expect(Array.from(dmdFrame("tt-8l", "celebrate", 87_654, undefined, elapsed))).toEqual(
+        Array.from(blastOffFrame(elapsed)),
+      );
+    }
   });
 });
 
@@ -390,14 +517,14 @@ describe("liveliness bar — calm glyphs show >=1 visible change/sec", () => {
     ["r5 standby", (t) => dmdFrame("r5", "idle", t)],
     ["ev-9d9 standby", (t) => dmdFrame("ev-9d9", "idle", t)],
     ["hk-47 domain", (t) => dmdFrame("hk-47", "domain", t, { primary: 2, secondary: 2 })],
+    // 2-1b's standby was redesigned in the PQRST task (a full sinus complex
+    // sweeping the width every 5s replaces the old single-blip crossing) and
+    // now clears the bar too.
+    ["2-1b standby", (t) => dmdFrame("2-1b", "idle", t)],
   ];
   for (const [label, render] of cases) {
     it(`${label}: at least 6 distinct frames across 13 samples over 6s`, () => {
       expect(distinctFrameCount(render)).toBeGreaterThanOrEqual(6);
     });
   }
-  // 2-1b's standby is intentionally left byte-identical pending a separate
-  // redesign spec — NOT held to this bar yet, and NOT touched by this
-  // pairing. Documented here so its absence from the cases list above reads
-  // as a deliberate exclusion, not an oversight.
 });
