@@ -173,32 +173,56 @@ describe("2-1b PQRST", () => {
     dmdFrame("2-1b", "domain", 480, { primary: n, secondary: amiss });
   const DOMAIN_BASELINE_Y = 12;
 
-  // Shared R-column finder: only the R-spike tip reaches y<6 (P/Q/S/T never
-  // do, at either baseline used by 2-1b's states), so scanning for the
-  // topmost lit row per column and thresholding at 6 isolates R-tip columns.
-  // Adjacent columns within the same tip (drawPqrst/drawAfibComplex both
-  // draw 2px-wide tips) collapse to their first column so each beat counts
-  // once.
+  // Shared R-column finder: only the R spike (tip AND its steep upstroke
+  // bridge) reaches y<6 (P/Q/S/T never do, at either baseline used by
+  // 2-1b's states), so scanning for the topmost lit row per column and
+  // thresholding at 6 isolates R-related columns.
+  //
+  // Fix round 1 (hardening, 2026-07-28): drawPqrst's R upstroke->tip bridge
+  // (dx 8->9, a steep climb in one x-step) is steep enough to ALSO dip
+  // below y<6 at dx=8, one column before the tip's own dx=9-10 (verified
+  // empirically). The old version of this helper deduped adjacent
+  // below-threshold columns down to the FIRST one encountered, which
+  // coupled "the" R column to the upstroke bridge's exact steepness — a
+  // future height/shape tweak could silently shift which column got
+  // reported. Now it groups adjacent columns (same gap<=2 rule) and reports
+  // each group's TRUE APEX — the column of that group's own global
+  // minimum-y pixel, i.e. the actual highest point — which is always one of
+  // the tip's own 2 columns (the tip is authored taller than the upstroke
+  // in every case: AFib's height budget is clamp(.., 8, ..), always >5, the
+  // upstroke's own offset — see drawAfibComplex), independent of how far
+  // the upstroke bridge happens to reach.
   function rColumns(f: Frame): number[] {
-    const cols: number[] = [];
+    const hits: Array<[x: number, minY: number]> = [];
     for (let x = 0; x < DMD_W; x++) {
       let minY = 99;
       for (let y = 0; y < 24; y++) if ((f[y * DMD_W + x] ?? 0) > 0) minY = Math.min(minY, y);
-      if (minY < 6) cols.push(x);
+      if (minY < 6) hits.push([x, minY]);
     }
-    return cols.filter((x, i) => i === 0 || x - (cols[i - 1] as number) > 2);
+    const groups: Array<Array<[x: number, minY: number]>> = [];
+    for (const hit of hits) {
+      const lastGroup = groups[groups.length - 1];
+      const lastHit = lastGroup?.[lastGroup.length - 1];
+      if (lastHit && hit[0] - lastHit[0] <= 2) lastGroup?.push(hit);
+      else groups.push([hit]);
+    }
+    return groups.map((g) => g.reduce((best, cur) => (cur[1] < best[1] ? cur : best))[0]);
   }
 
-  // P-wave discriminator. drawPqrst's P wave peaks at baseline-2 (dx=1
-  // relative to the complex's xOrigin), 5 columns before the R-tip column
-  // (dx=6, the first of the tip's 2 tied columns that rColumns() keeps).
-  // AFib's fibrillatory baseline jitter is contractually only ±1px (see
-  // drawAfibWavelets), so it can never reach baseline-2 — a lit pixel
-  // exactly 2px above baseline, in the 4-column window ending 3 columns
-  // before an R-tip column, is provably a genuine P wave, not jitter noise.
+  // P-wave discriminator (recalibrated for the morphology wave, 2026-07-28:
+  // P widened from a 2-point bump to a 5-column rounded arc peaking at
+  // baseline-2, dx=2 relative to the complex's xOrigin). AFib's
+  // fibrillatory baseline jitter is contractually only ±1px (see
+  // drawAfibWavelets), so it can never reach baseline-2 — the window is
+  // centered on the P peak's measured offset from rColumns()'s apex column
+  // (dx=2 relative to xOrigin, dx=9 for the apex — a -7 delta), with a
+  // 2-column margin on each side. The plant test below proves the margin
+  // doesn't swallow the Q->R-upstroke bridge's own baseline-2 crossing
+  // (which lands at relative offset -1 from the apex — see drawPqrst's
+  // NOTE comment).
   function pRegionLit(f: Frame, rCol: number, baselineY: number): boolean {
     const row = baselineY - 2;
-    for (let dx = -6; dx <= -3; dx++) {
+    for (let dx = -9; dx <= -5; dx++) {
       const x = rCol + dx;
       if (x >= 0 && x < DMD_W && (f[row * DMD_W + x] ?? 0) > 0) return true;
     }
@@ -230,6 +254,40 @@ describe("2-1b PQRST", () => {
     for (const rCol of afibRs) expect(pRegionLit(afib, rCol, DOMAIN_BASELINE_Y)).toBe(false);
   });
 
+  // Recalibration plant (morphology wave 2026-07-28; re-verified after fix
+  // round 1's rColumns() hardening moved the apex column from the upstroke
+  // to the tip's own start). Proves the P-window ([-9,-5]) isn't vacuously
+  // passing. The Q->R-upstroke bridge (see drawPqrst's NOTE comment)
+  // genuinely DOES cross row baseline-2, at relative offset -1 from the
+  // apex column (i.e. one column before it, not AT it) — in BOTH rhythms,
+  // since drawAfibComplex's Q->upstroke bridge has the same steep shape.
+  // First confirm the crossing is real (so this isn't testing nothing),
+  // then confirm the window excludes it.
+  it("P-window survives the Q->R-upstroke bridge's own baseline-2 crossing (recalibration plant)", () => {
+    for (const amiss of [0, 1] as const) {
+      const f = dom(2, amiss) as Frame;
+      const row = DOMAIN_BASELINE_Y - 2;
+      for (const rCol of rColumns(f)) {
+        // The bridge artifact is real: the column one before the apex is
+        // lit at baseline-2 (relative offset -1).
+        expect(f[row * DMD_W + (rCol - 1)] ?? 0).toBeGreaterThan(0);
+      }
+    }
+    // And the discriminator still tells the rhythms apart correctly despite
+    // that shared artifact sitting right next to the apex (offset -1, just
+    // outside the window's -5 edge).
+    expect(
+      rColumns(dom(2, 0) as Frame).every((c) =>
+        pRegionLit(dom(2, 0) as Frame, c, DOMAIN_BASELINE_Y),
+      ),
+    ).toBe(true);
+    expect(
+      rColumns(dom(2, 1) as Frame).some((c) =>
+        pRegionLit(dom(2, 1) as Frame, c, DOMAIN_BASELINE_Y),
+      ),
+    ).toBe(false);
+  });
+
   it("AFib R-R intervals are irregularly irregular; sinus intervals are equal", () => {
     const sinusSpikes = rColumns(dom(3, 0) as Frame);
     const afibSpikes = rColumns(dom(3, 1) as Frame);
@@ -253,13 +311,120 @@ describe("2-1b PQRST", () => {
   it("domain intensity caps hold in BOTH rhythms", () => {
     for (const amiss of [0, 1]) {
       const f = dom(3, amiss);
-      expect(f.filter((v) => v === 3).length).toBeLessThanOrEqual(6); // ≤2px × 3 beats
+      // Sinus (amiss=0) renders at most 2 beats post-rescale (≤2px × 2);
+      // AFib (amiss=1) is unchanged, up to the shared clamp(1,6) (≤2px × 3
+      // here since primary=3). Same upper bound covers both without needing
+      // to branch the assertion on rhythm.
+      expect(f.filter((v) => v === 3).length).toBeLessThanOrEqual(6);
     }
   });
 
   it("ceiling clamp still holds in both rhythms", () => {
+    // Sinus: the beat-count rescale (morphology wave, 2026-07-28) replaced
+    // clamp(primary,1,6) with clamp(primary,1,2) FOR BEAT COUNT, but the R-R
+    // SPACING that conveys load (drawSinusBeats) saturates at the same
+    // primary=6 point the old cap used — so this invariant survives
+    // unchanged in form: primary=6 and primary=10 still render identically,
+    // just because the spacing formula's own clamp(primary,2,6) saturates,
+    // not because the beat count does (that saturates already at primary=2).
     expect(Array.from(dom(6, 0))).toEqual(Array.from(dom(10, 0)));
+    // AFib: untouched by the rescale — same clamp(1,6) as before.
     expect(Array.from(dom(6, 1))).toEqual(Array.from(dom(10, 1)));
+  });
+
+  // Beat-count rescale (morphology wave, 2026-07-28): pins the new mapping
+  // directly, separate from the ceiling-clamp invariant above.
+  describe("sinus beat-count rescale", () => {
+    it("renders at most 2 full complexes at any primary, unlike AFib's up-to-6", () => {
+      for (const primary of [1, 2, 3, 4, 6, 10]) {
+        const sinusRs = rColumns(dom(primary, 0) as Frame);
+        expect(sinusRs.length).toBeLessThanOrEqual(2);
+      }
+      // AFib at the same primary values can exceed 2 (it's still clamp(1,6)).
+      const afibRs = rColumns(dom(6, 1) as Frame);
+      expect(afibRs.length).toBeGreaterThan(2);
+    });
+
+    it("primary<=1 renders a single complex; primary>=2 renders two", () => {
+      expect(rColumns(dom(1, 0) as Frame).length).toBe(1);
+      expect(rColumns(dom(2, 0) as Frame).length).toBe(2);
+    });
+
+    it("R-R spacing between the two beats shrinks as primary rises from 2 to 6 (honest load signal)", () => {
+      const gapAt = (primary: number) => {
+        const cols = rColumns(dom(primary, 0) as Frame);
+        expect(cols.length).toBe(2);
+        return (cols[1] as number) - (cols[0] as number);
+      };
+      const gapLow = gapAt(2);
+      const gapMid = gapAt(4);
+      const gapHigh = gapAt(6);
+      expect(gapLow).toBeGreaterThan(gapMid);
+      expect(gapMid).toBeGreaterThan(gapHigh);
+      // Never compresses enough for the two 22px-footprint complexes to
+      // visually merge (26px min gap, per drawSinusBeats' own contract).
+      // rCol is the R-tip apex (fixed dx=9 offset from each beat's xOrigin —
+      // see rColumns' fix round 1 comment), so this gap should land exactly
+      // on drawSinusBeats' own gap value; a small margin covers rounding.
+      expect(gapHigh).toBeGreaterThanOrEqual(24);
+    });
+
+    it("spacing saturates at primary=6 — primary=6 and primary=10 have identical R-R gap", () => {
+      const gapAt = (primary: number) => {
+        const cols = rColumns(dom(primary, 0) as Frame);
+        return (cols[1] as number) - (cols[0] as number);
+      };
+      expect(gapAt(6)).toBe(gapAt(10));
+    });
+  });
+
+  // Fix round 1, P1 floor-side regression (2026-07-28): a reviewer sweep
+  // found AFib's R-tip silently clipping off-frame at the domain baseline
+  // (y=12) in ~10.5% of frames — h could jitter to 13-14, sending the tip
+  // to y<=-1, which px()'s bounds check quietly no-ops. The fix caps h to
+  // the available headroom (drawAfibComplex's own comment). Pin the FLOOR,
+  // not just an upper bound: the v=3 pixel count must be EXACTLY beats*2
+  // (2px tip x beats), never less — across a real sweep of both primary
+  // (which sets beats) and sweepIdx (which reseeds the PRNG driving
+  // ampAdjust, per drawAfib's own comment on its rand stream), and across
+  // BOTH baselines domain (12, the one that broke) and active (16, the one
+  // that was already fine — pinned here so a future regression there would
+  // also be caught).
+  describe("AFib R-tip never clips (fix round 1 floor-side regression)", () => {
+    const beatsFor = (primary: number) => Math.max(1, Math.min(6, primary));
+
+    it("domain AFib: v=3 pixel count is exactly beats*2 across a full (primary, sweepIdx) sweep", () => {
+      for (const primary of [1, 2, 3, 4, 5, 6]) {
+        for (let sweepIdx = 0; sweepIdx < 20; sweepIdx++) {
+          const t = sweepIdx * 5120; // sweepMs, see drawAfib
+          const f = dmdFrame("2-1b", "domain", t, { primary, secondary: 1 }) as Frame;
+          const v3 = f.filter((v) => v === 3).length;
+          expect(v3).toBe(beatsFor(primary) * 2);
+        }
+      }
+    });
+
+    it("active AFib: v=3 pixel count is exactly beats*2 across the same sweep (baseline=16, already fine — pinned against future regression)", () => {
+      for (const primary of [1, 2, 3, 4, 5, 6]) {
+        for (let sweepIdx = 0; sweepIdx < 20; sweepIdx++) {
+          const t = sweepIdx * 5120;
+          const f = dmdFrame("2-1b", "active", t, { primary, secondary: 0 }) as Frame;
+          const v3 = f.filter((v) => v === 3).length;
+          expect(v3).toBe(beatsFor(primary) * 2);
+        }
+      }
+    });
+
+    it("domain AFib R height still varies (compressed, not flattened) — at least 2 distinct tip rows across the sweep", () => {
+      const tipRows = new Set<number>();
+      for (let sweepIdx = 0; sweepIdx < 20; sweepIdx++) {
+        const t = sweepIdx * 5120;
+        const f = dmdFrame("2-1b", "domain", t, { primary: 1, secondary: 1 }) as Frame;
+        for (let y = 0; y < 24; y++)
+          for (let x = 0; x < DMD_W; x++) if (f[y * DMD_W + x] === 3) tipRows.add(y);
+      }
+      expect(tipRows.size).toBeGreaterThanOrEqual(2);
+    });
   });
 
   it("all 2-1b states stay in rows 0-23", () => {
