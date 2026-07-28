@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { emptyPurview } from "../purview.js";
-import type { BoardMode } from "./controller.js";
+import type { BoardMode, BoardView } from "./controller.js";
 import { COOLING_MIN, deriveDmdState, startDmd } from "./controller.js";
 import { dmdFrame } from "./glyphs.js";
 
@@ -248,5 +248,65 @@ describe("startDmd", () => {
     // "idle" must force the flap board to clear, so the painted frame is
     // exactly the plain idle glyph with no flap-band contribution at all.
     expect(Array.from(idleFrame)).toEqual(Array.from(dmdFrame("r5", "idle", t)));
+  });
+
+  it("tt-8l blast-off: anchors to celebration start (not the free-running clock) and climbs continuously across ticks on an unchanged view", () => {
+    // Reproduces the reported bug directly: t starts at a large, arbitrary
+    // value (standing in for "the app has been running a while") to prove
+    // the arc's phase is NOT derived from tMs % 3000.
+    let t = 87_654;
+    const paint = vi.fn();
+    const root = document.createElement("div");
+    root.innerHTML = '<canvas data-dmd="tt-8l" width="192" height="96"></canvas>';
+    let queued: (() => void) | null = null;
+    const raf = vi.fn((cb: () => void) => {
+      queued = cb;
+    });
+    let view: BoardView = {
+      mode: "live",
+      droids: [{ droid: "tt-8l", state: "idle" }],
+      celebrating: false,
+      celebrateElapsedAtRenderMs: null,
+      renderedAtMs: NOW,
+      purview: emptyPurview(),
+    };
+    startDmd({
+      root,
+      reducedMotion: false,
+      raf,
+      paint,
+      now: () => t,
+      getBoard: () => view,
+    });
+
+    // A new merge lands: main.ts constructs a fresh BoardView (new object
+    // identity) with celebrating=true and elapsedAtRender≈0.
+    view = { ...view, celebrating: true, celebrateElapsedAtRenderMs: 0 };
+    (queued as (() => void) | null)?.();
+    const atStart = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    // Pad-level body top row is lit at the celebration's very start.
+    expect(atStart[8 * 64 + 48]).toBeGreaterThan(0);
+
+    // 2900ms later, the SAME view object is still current (no fresher poll
+    // has landed — polls are ~20s apart, celebrations are 3s) but paint
+    // ticks keep firing. The arc must have kept climbing using the paint
+    // clock's own delta, not frozen and not re-derived from t's raw value.
+    t = 87_654 + 2900;
+    (queued as (() => void) | null)?.();
+    const nearTop = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    expect(nearTop[8 * 64 + 48] ?? 0).toBe(0); // climbed clear of the pad row
+    expect(Array.from(nearTop)).toEqual(
+      Array.from(dmdFrame("tt-8l", "celebrate", t, undefined, 2900)),
+    );
+
+    // The celebration ends, then a SECOND one starts later at yet another
+    // large, arbitrary t. It must restart at the pad (elapsed 0) rather than
+    // resuming wherever tMs % 3000 happens to land — this is the exact
+    // "vanish, reappear on the pad, relaunch mid-celebration" bug.
+    view = { ...view, celebrating: true, celebrateElapsedAtRenderMs: 0 };
+    t += 100_000;
+    (queued as (() => void) | null)?.();
+    const secondStart = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    expect(secondStart[8 * 64 + 48]).toBeGreaterThan(0); // back at the pad, not mid-climb
   });
 });

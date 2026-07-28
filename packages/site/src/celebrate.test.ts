@@ -74,3 +74,52 @@ describe("createCelebrationTracker", () => {
     expect(tracker.observe([])).toBe(false);
   });
 });
+
+describe("elapsedMs", () => {
+  it("is null before any celebration", () => {
+    const t = 0;
+    const tracker = createCelebrationTracker(() => t);
+    expect(tracker.elapsedMs()).toBeNull();
+  });
+
+  it("is 0 at the moment a celebration starts and grows with the tracker's own clock", () => {
+    let t = 1_000;
+    const tracker = createCelebrationTracker(() => t);
+    tracker.observe(chainWithHop("2026-07-26T10:00:00Z"));
+    expect(tracker.elapsedMs()).toBe(0);
+
+    t = 1_000 + 1_500;
+    expect(tracker.elapsedMs()).toBe(1_500);
+  });
+
+  it("is null again once the window expires", () => {
+    let t = 0;
+    const tracker = createCelebrationTracker(() => t);
+    tracker.observe(chainWithHop("2026-07-26T10:00:00Z"));
+    t = 3_000; // exactly at expiry — observe()'s `now() < celebrateUntil` is exclusive
+    expect(tracker.elapsedMs()).toBeNull();
+  });
+
+  it("a merge arriving mid-celebration extends the window but does NOT reset the start — elapsedMs keeps growing from the original start, not from 0", () => {
+    let t = 0;
+    const tracker = createCelebrationTracker(() => t);
+    tracker.observe(chainWithHop("2026-07-26T10:00:00Z"));
+
+    t = 1_000; // still well within the first 3s window
+    tracker.observe(chainWithHop("2026-07-26T10:00:01Z")); // a newer merge lands
+    // Had the start reset here, elapsedMs would be 0. It must instead read
+    // as "1000ms into the still-ongoing span" — the rocket keeps climbing,
+    // it doesn't snap back to the pad for every merge in a burst.
+    expect(tracker.elapsedMs()).toBe(1_000);
+  });
+
+  it("a merge arriving AFTER expiry starts a fresh span at elapsedMs=0", () => {
+    let t = 0;
+    const tracker = createCelebrationTracker(() => t);
+    tracker.observe(chainWithHop("2026-07-26T10:00:00Z"));
+
+    t = 5_000; // past expiry
+    tracker.observe(chainWithHop("2026-07-26T10:05:00Z"));
+    expect(tracker.elapsedMs()).toBe(0);
+  });
+});

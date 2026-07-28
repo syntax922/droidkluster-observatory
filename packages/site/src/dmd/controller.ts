@@ -18,6 +18,17 @@ export interface BoardView {
   // real wall time racing ahead of the story being replayed.
   renderedAtMs: number;
   purview: Purview;
+  // Ms elapsed in the celebration tracker's own real-time clock (see
+  // celebrate.ts's elapsedMs()) as of this render, or null/undefined when
+  // not celebrating. Deliberately NOT a timestamp to diff against
+  // renderedAtMs — renderedAtMs is real time in live mode but a replayed
+  // historical time in replay mode, while the tracker always runs on real
+  // display-clock time in both; this field is pre-computed in the tracker's
+  // own domain so no cross-clock arithmetic happens here. Optional so
+  // BoardView literals that never celebrate don't need to carry it. Used
+  // only to anchor tt-8l's blast-off climb to the celebration's real start
+  // — see paintAll's celebrateElapsedMs.
+  celebrateElapsedAtRenderMs?: number | null;
 }
 
 // How long a droid's DMD keeps a visible afterglow after its last recorded
@@ -69,6 +80,16 @@ export function startDmd(opts: StartDmdOpts): () => void {
   let lastPaint = 0;
   const boards = new Map<DroidId, FlapBoard>();
 
+  // Anchors tt-8l's blast-off climb to the celebration's real start instead
+  // of the free-running paint clock. main.ts always constructs a fresh
+  // BoardView object on each render, so a reference change here means "a new
+  // render happened" — that's the moment we (re)anchor viewSeenAtT to the
+  // current paint-clock tick. Between renders (the common case — polls are
+  // ~20s apart, celebration windows are 3s), celebrateElapsedMs keeps
+  // growing purely from paint-clock deltas, no fresh Date.now() reads.
+  let lastView: BoardView | null = null;
+  let viewSeenAtT = 0;
+
   function boardFor(droid: DroidId): FlapBoard {
     let board = boards.get(droid);
     if (!board) {
@@ -89,6 +110,19 @@ export function startDmd(opts: StartDmdOpts): () => void {
 
   function paintAll(t: number): string {
     const view = opts.getBoard();
+    if (view !== lastView) {
+      lastView = view;
+      viewSeenAtT = t;
+    }
+    // How far into the current celebration span we are, expressed in the
+    // paint clock's own units: a fixed base (how much of the span had
+    // already elapsed, per the tracker's own real-time clock, as of this
+    // render — normally ~0) plus how many paint ticks have passed since we
+    // first painted this exact view. Only meaningful while celebrating;
+    // unused (and left undefined) otherwise so non-celebrating glyphs never
+    // see it.
+    const celebrateBaseMs = Math.max(0, view.celebrateElapsedAtRenderMs ?? 0);
+    const celebrateElapsedMs = celebrateBaseMs + Math.max(0, t - viewSeenAtT);
     const parts: string[] = [];
     for (const { el, droid } of canvases()) {
       const status = view.droids.find((d) => d.droid === droid) ?? {
@@ -110,10 +144,13 @@ export function startDmd(opts: StartDmdOpts): () => void {
         view.mode === "idle" || state === "stale" || state === "celebrate" ? [] : purview.prs,
         t,
       );
-      const frame = dmdFrame(droid, state, t, {
-        primary: purview.prs.length,
-        secondary: purview.secondary,
-      });
+      const frame = dmdFrame(
+        droid,
+        state,
+        t,
+        { primary: purview.prs.length, secondary: purview.secondary },
+        state === "celebrate" ? celebrateElapsedMs : undefined,
+      );
       flapBoard.overlay(frame, t, reduced);
       paint(el, frame, ACCENTS[droid]);
     }

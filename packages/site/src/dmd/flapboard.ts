@@ -133,8 +133,11 @@ export function createFlapBoard(): FlapBoard {
           drawFlipCell(f, prev, target, x, (tMs - start) / FLIP_MS);
         } else {
           const shown = !reducedMotion && tMs < start ? prev : target;
-          const v = i === 0 && shown === "#" ? 3 : 2;
-          drawChar(f, shown, x, BOARD_ROW_Y, v);
+          // All settled cells render uniform (v=2) — the leading "#" used to
+          // get a v=3 accent, but that read as 12 persistent full-brightness
+          // pixels rather than a momentary highlight, out of place on an
+          // otherwise-settled page.
+          drawChar(f, shown, x, BOARD_ROW_Y, 2);
         }
       }
     },

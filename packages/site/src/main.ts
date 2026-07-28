@@ -43,6 +43,7 @@ let lastBoard: BoardView = {
   mode: "idle",
   droids: [],
   celebrating: false,
+  celebrateElapsedAtRenderMs: null,
   renderedAtMs: Date.now(),
   purview: emptyPurview(),
 };
@@ -112,10 +113,12 @@ function renderLive(snap: CurrentSnapshot): void {
   renderJourneys(els.journeys, lanes);
   laneState = states;
   renderHonesty(els.honesty, { mode: "live", lastContact: snap.last_contact, nowMs: now });
+  const celebrating = celebration.observe(snap.chains);
   lastBoard = {
     mode: "live",
     droids: snap.droids,
-    celebrating: celebration.observe(snap.chains),
+    celebrating,
+    celebrateElapsedAtRenderMs: celebration.elapsedMs(),
     renderedAtMs: now,
     purview: derivePurview(snap.chains, liveFeedEvents, now),
   };
@@ -155,10 +158,12 @@ const replay = createReplayController({
       nowMs: Date.now(),
       replayLabel: label,
     });
+    const celebrating = celebration.observe(snap.chains);
     lastBoard = {
       mode: "replay",
       droids: snap.droids,
-      celebrating: celebration.observe(snap.chains),
+      celebrating,
+      celebrateElapsedAtRenderMs: celebration.elapsedMs(),
       renderedAtMs: replayNow,
       purview: derivePurview(snap.chains, feed, replayNow),
     };
@@ -171,6 +176,7 @@ const replay = createReplayController({
       mode: "idle",
       droids: lastBoard.droids,
       celebrating: false,
+      celebrateElapsedAtRenderMs: null,
       renderedAtMs: lastBoard.renderedAtMs,
       // Fresh emptyPurview(), NOT carried-forward lastBoard.purview: "idle"
       // mode derives DmdState "idle" (not "stale"), so the flap board has no
@@ -223,6 +229,7 @@ startPolling({
         mode: "stale",
         droids: lastBoard.droids,
         celebrating: false,
+        celebrateElapsedAtRenderMs: null,
         renderedAtMs: lastBoard.renderedAtMs,
         // Fresh emptyPurview(), NOT lastBoard.purview: BoardMode "stale"
         // already renders the whole DMD frame as "stale" (deriveDmdState
@@ -250,6 +257,7 @@ startPolling({
         mode: "stale",
         droids: lastBoard.droids,
         celebrating: false,
+        celebrateElapsedAtRenderMs: null,
         renderedAtMs: lastBoard.renderedAtMs,
         // Fresh emptyPurview(), NOT lastBoard.purview: BoardMode "stale"
         // already renders the whole DMD frame as "stale" (deriveDmdState

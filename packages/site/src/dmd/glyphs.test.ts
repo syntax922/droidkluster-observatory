@@ -204,6 +204,36 @@ describe("tt-8l shipping department", () => {
       Array.from(dmdFrame("tt-8l", "celebrate", 1234)),
     );
   });
+  it("blast-off arc is anchored to celebration-elapsed time, not the free-running clock", () => {
+    // Pin the bug: two wildly different tMs values (the free-running paint
+    // clock) must render the SAME frame when the celebration-elapsed time
+    // (the 5th arg) is the same — the arc's phase depends only on how far
+    // into the celebration we are, never on when the clock happens to read.
+    const a = dmdFrame("tt-8l", "celebrate", 900, undefined, 500);
+    const b = dmdFrame("tt-8l", "celebrate", 87_654, undefined, 500);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+  it("at elapsed=0 the rocket sits at pad level; by elapsed~2900 it's climbed near/off the top", () => {
+    const idx = (y: number, x: number) => y * DMD_W + x;
+    const atStart = dmdFrame("tt-8l", "celebrate", 0, undefined, 0);
+    const nearTop = dmdFrame("tt-8l", "celebrate", 0, undefined, 2900);
+    // Pad-level body top row (bodyTop=8 at riseY=0): lit at elapsed=0...
+    expect(atStart[idx(8, 48)]).toBeGreaterThan(0);
+    // ...but the climb has carried the body well clear of that row by 2900ms.
+    expect(nearTop[idx(8, 48)] ?? 0).toBe(0);
+    // And the rocket's tail is now hugging the top of the board (row 0-1),
+    // clipped by px()'s bounds check on everything above it — "near/off the
+    // top", not still mid-climb.
+    const topRows = [0, 1].some(
+      (y) => (nearTop[idx(y, 47)] ?? 0) > 0 || (nearTop[idx(y, 54)] ?? 0) > 0,
+    );
+    expect(topRows).toBe(true);
+  });
+  it("defaults to the pad frame (elapsed=0) when no elapsed is supplied — never the old modulo-of-tMs behavior", () => {
+    const noElapsedArg = dmdFrame("tt-8l", "celebrate", 87_654);
+    const explicitZero = dmdFrame("tt-8l", "celebrate", 0, undefined, 0);
+    expect(Array.from(noElapsedArg)).toEqual(Array.from(explicitZero));
+  });
   it("all tt-8l scene states stay above the flap band (rows 0-23)", () => {
     for (const [state, counts] of [
       ["idle", undefined],

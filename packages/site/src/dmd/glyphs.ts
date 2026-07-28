@@ -395,14 +395,22 @@ domainGlyphs["tt-8l"] = (t, counts) => {
 // rocket climbs off the top of the board over a 3s window (naturally
 // clipped by px()'s bounds check) while jittered exhaust columns trail
 // beneath it; the pad stays lit throughout.
-function blastOffFrame(tMs: number): Frame {
+//
+// `elapsedMs` is ms since THIS celebration span began — not the free-running
+// animation clock. Anchoring the climb to a modulo of the free-running clock
+// (the previous implementation) let the arc's phase at celebration-start be
+// whatever the clock happened to read, so the rocket could open mid-climb,
+// wrap to the pad, and relaunch within a single 3s celebration. The caller
+// (dmd/controller.ts) is responsible for computing elapsedMs relative to the
+// celebration's actual start.
+function blastOffFrame(elapsedMs: number): Frame {
   const f = blank();
   hline(f, 40, 60, 22, 1);
-  const progress = (tMs % 3000) / 3000;
+  const progress = clamp(elapsedMs, 0, 3000) / 3000;
   const riseY = Math.round(progress * 22); // body top climbs y=8 -> y=-14
   drawRocketAt(f, riseY, 2);
   const bodyBottom = 8 - riseY + 14;
-  const rand = mulberry32(Math.floor(tMs / 90));
+  const rand = mulberry32(Math.floor(elapsedMs / 90));
   const cols = 2 + Math.round(progress); // widens 2 -> 3 as it climbs
   for (let i = 0; i < cols; i++) {
     const cx = 50 + i - Math.floor(cols / 2) + (Math.floor(rand() * 3) - 1);
@@ -544,6 +552,15 @@ export function dmdFrame(
   state: DmdState,
   tMs: number,
   counts?: GlyphCounts,
+  // tt-8l's celebrate case ONLY: ms since the current celebration span
+  // began (see blastOffFrame). Every other droid's celebrate render
+  // (celebrateFrame, the diamond rings) stays phase-agnostic on tMs — a
+  // dedicated param rather than a GlyphCounts field keeps that scene from
+  // having to know or care about celebration timing at all. Defaults to 0
+  // (rocket on the pad) rather than falling back to tMs, so a caller that
+  // forgets to thread the real value gets an inert-but-honest frame instead
+  // of resurrecting the old mid-climb-start bug.
+  celebrateElapsedMs?: number,
 ): Frame {
   switch (state) {
     case "idle":
@@ -553,7 +570,7 @@ export function dmdFrame(
     case "stale":
       return staleFrame(tMs);
     case "celebrate":
-      return droid === "tt-8l" ? blastOffFrame(tMs) : celebrateFrame(tMs);
+      return droid === "tt-8l" ? blastOffFrame(celebrateElapsedMs ?? 0) : celebrateFrame(tMs);
     case "active": {
       const glyph = activeGlyphs[droid];
       return glyph ? glyph(tMs, counts ?? { primary: 0, secondary: 0 }) : idleFrame(tMs);
