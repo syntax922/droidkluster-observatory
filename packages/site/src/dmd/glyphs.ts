@@ -572,26 +572,73 @@ export function blastOffFrame(elapsedMs: number): Frame {
   return f;
 }
 
+// Bresenham line: plots every integer cell from (x0,y0) to (x1,y1) so each
+// step is Chebyshev-adjacent to the last — the continuity primitive
+// drawHeartRing uses to bridge consecutive curve samples. (Fix round 1:
+// the original heart ring plotted samples as isolated dots; at r≈8-12 the
+// cusp-heavy parametrization below spaces consecutive rounded samples more
+// than 1px apart on the flanks, so the outline fragmented into scatter
+// instead of reading as a closed shape. Bridging guarantees a connected
+// chain regardless of sample spacing or r.)
+function plotLine(f: Frame, x0: number, y0: number, x1: number, y1: number, v: number): void {
+  let x = x0;
+  let y = y0;
+  const dx = Math.abs(x1 - x0);
+  const dy = -Math.abs(y1 - y0);
+  const sx = x0 < x1 ? 1 : -1;
+  const sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    px(f, x, y, v);
+    if (x === x1 && y === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) {
+      err += dy;
+      x += sx;
+    }
+    if (e2 <= dx) {
+      err += dx;
+      y += sy;
+    }
+  }
+}
+
 // 2-1b — celebrate override: a heart outline instead of the shared diamond
 // rings, using the classic parametric heart curve (x = 16·sin³t,
 // y = 13·cos t − 5·cos 2t − 2·cos 3t − cos 4t) scaled by r/16 — a real heart
 // silhouette (two lobes meeting a V taper to a bottom point) rather than a
 // hand-rolled arc approximation, so it reads unambiguously as a heart at
 // every ring size instead of only at the hand-tuned r≈8-12 sweet spot.
-function drawHeartRing(f: Frame, cx: number, cy: number, r: number, v: number): void {
+// Exported so tests can render an isolated single ring (heartCelebrateFrame
+// always overlays two) for the continuity structural check.
+//
+// Fix round 1: sample density now scales with r (`8*r`, floor 48) so the
+// curve stays smooth as it grows, AND consecutive samples are bridged with
+// plotLine rather than plotted as isolated dots — density alone doesn't
+// guarantee adjacency after rounding to integer pixels (the cusps at the
+// top-center notch and the bottom point compress many samples into few
+// pixels while the flanks spread them out), so the outline needs the
+// explicit bridge to stay a single continuous chain at every r.
+export function drawHeartRing(f: Frame, cx: number, cy: number, r: number, v: number): void {
   if (r <= 0) {
     px(f, cx, cy, v);
     return;
   }
   const scale = r / 16;
-  const steps = 48;
-  for (let i = 0; i < steps; i++) {
-    const t = (i / steps) * Math.PI * 2;
+  const steps = Math.max(48, 8 * r);
+  const point = (t: number): [number, number] => {
     const hx = 16 * Math.sin(t) ** 3;
     const hy = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
     // y is flipped (cy - hy·scale, not cy + hy·scale): the curve's +y is
     // "up" (toward the lobes), but the DMD's y grows downward.
-    px(f, Math.round(cx + hx * scale), Math.round(cy - hy * scale), v);
+    return [Math.round(cx + hx * scale), Math.round(cy - hy * scale)];
+  };
+  let [px0, py0] = point(0);
+  for (let i = 1; i <= steps; i++) {
+    const [px1, py1] = point((i / steps) * Math.PI * 2);
+    plotLine(f, px0, py0, px1, py1, v);
+    px0 = px1;
+    py0 = py1;
   }
 }
 

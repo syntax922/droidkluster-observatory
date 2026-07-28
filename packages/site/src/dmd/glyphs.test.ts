@@ -6,6 +6,7 @@ import {
   blastOffFrame,
   celebrateFrame,
   dmdFrame,
+  drawHeartRing,
   standbyGlyphs,
 } from "./glyphs.js";
 
@@ -295,6 +296,34 @@ describe("2-1b PQRST", () => {
       expect(Array.from(dmdFrame("tt-8l", "celebrate", 87_654, undefined, elapsed))).toEqual(
         Array.from(blastOffFrame(elapsed)),
       );
+    }
+  });
+});
+
+// Fix round 1 (heart-ring legibility, P2): at r=8-12 the original
+// fixed-density sampling produced isolated dots that fragmented into
+// scatter on the flanks. drawHeartRing now bridges consecutive curve
+// samples with a Bresenham line, so the outline is a single continuous
+// chain by construction. This pins that structurally: every lit pixel of
+// an isolated ring (not heartCelebrateFrame's overlaid pair — one ring in
+// isolation, so gaps can't hide behind the second ring's pixels) must have
+// at least one other lit pixel within Chebyshev distance 1, at every
+// tested radius including the brief's called-out r=8-12 range.
+describe("2-1b heart-ring continuity (fix round 1)", () => {
+  it("a single ring's outline is a continuous chain — no fragmented scatter — at r=4,6,8,10,12,15", () => {
+    for (const r of [4, 6, 8, 10, 12, 15]) {
+      const f = blank();
+      drawHeartRing(f, 32, 16, r, 3);
+      const points: Array<[number, number]> = [];
+      for (let y = 0; y < 32; y++)
+        for (let x = 0; x < 64; x++) if ((f[y * 64 + x] ?? 0) > 0) points.push([x, y]);
+      expect(points.length).toBeGreaterThan(0);
+      for (const [x, y] of points) {
+        const hasNeighbor = points.some(
+          ([x2, y2]) => (x2 !== x || y2 !== y) && Math.max(Math.abs(x2 - x), Math.abs(y2 - y)) <= 1,
+        );
+        expect(hasNeighbor).toBe(true);
+      }
     }
   });
 });
