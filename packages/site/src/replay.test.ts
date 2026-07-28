@@ -44,7 +44,9 @@ describe("ReplayPlayer", () => {
     });
     player.start();
     expect(frames).toHaveLength(1); // first event fires immediately
-    vi.advanceTimersByTime(1599); // just short of the base dwell (1600ms)
+    // pr_opened's dwell = base (2400) + notable extension (1200, kind !=
+    // check_run) = 3600.
+    vi.advanceTimersByTime(3599); // just short of that dwell
     expect(frames).toHaveLength(1);
     vi.advanceTimersByTime(1);
     expect(frames).toHaveLength(2);
@@ -95,11 +97,14 @@ describe("ReplayPlayer", () => {
     });
     player.start();
     expect(frames).toHaveLength(1); // pr_opened shown immediately
-    vi.advanceTimersByTime(1600); // pr_opened's base dwell elapses
+    // pr_opened's dwell = base (2400) + notable extension (1200) = 3600.
+    vi.advanceTimersByTime(3600);
     expect(frames).toHaveLength(2); // the excerpt-bearing review is now current
-    vi.advanceTimersByTime(4199); // just short of the excerpt dwell
-    expect(frames).toHaveLength(2); // still holding — not the 1600/3000ms a non-excerpt event would use
-    vi.advanceTimersByTime(1); // completes the 4200ms excerpt dwell
+    // The excerpt review's dwell = excerpt base (4200) + notable extension
+    // (1200, kind != check_run) = 5400.
+    vi.advanceTimersByTime(5399); // just short of that dwell
+    expect(frames).toHaveLength(2); // still holding — not the 2400/3000ms a non-excerpt event would use
+    vi.advanceTimersByTime(1); // completes the 5400ms excerpt dwell
     expect(frames).toHaveLength(3);
     vi.useRealTimers();
   });
@@ -223,9 +228,13 @@ describe("ReplayPlayer", () => {
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(timestamps).toHaveLength(total);
     const gaps = timestamps.slice(1).map((t, i) => t - (timestamps[i] ?? t));
-    expect(gaps.every((g) => g === 4200)).toBe(true); // unscaled excerpt dwell throughout
+    // Every event here is kind "review_posted" (always notable, since
+    // notability only withholds the extension from non-red check_run beats)
+    // carrying an excerpt: dwell = excerpt base (4200) + notable extension
+    // (1200) = 5400, unscaled throughout.
+    expect(gaps.every((g) => g === 5400)).toBe(true);
 
-    // 59 excerpt gaps of 4200ms = 247,800ms, well past the 180s cap.
+    // 59 excerpt gaps of 5400ms = 318,600ms, well past the 180s cap.
     // Excerpt dwells never shrink, so an all-excerpt bundle legitimately
     // runs long — that's the guard's intended behavior, not a bug.
     const totalDuration = (timestamps[timestamps.length - 1] ?? start) - start;
@@ -379,9 +388,16 @@ describe("ReplayPlayer", () => {
     });
     player.start();
     expect(snapshots).toHaveLength(1); // first event fires immediately
-    // 12 base-dwell (1600ms) hops + 1 pr_merged hop (3000ms) between the 13
-    // events = 20,600ms of dwell to walk through the whole chain.
-    vi.advanceTimersByTime(21_000);
+    // 12 gaps (e1..k12) to walk through the first 13 events. All events are
+    // notable (kind != check_run) except e6 ("CI cancelled", a non-red
+    // check_run — stays at base with no extension); e5 ("CI red") is a
+    // check_run but IS notable per the red-build rule. Per-gap dwell = base
+    // dwell for that event's kind, + 1200 if notable:
+    //   e1-e4, e5(red), e7-e9, k11, k12 -> 10 gaps @ (2400+1200)=3600
+    //   e6 ("CI cancelled", non-red check_run) -> 1 gap @ 2400 (no extension)
+    //   e10 (pr_merged) -> 1 gap @ (3000+1200)=4200
+    // Total = 10*3600 + 2400 + 4200 = 42,600ms.
+    vi.advanceTimersByTime(43_000);
     expect(snapshots).toHaveLength(13);
     // Assert against chain hops (reducer output) for original 10 pr-bearing kinds
     const finalSnap = snapshots[snapshots.length - 1];
@@ -470,18 +486,17 @@ describe("ReplayPlayer", () => {
     player.start();
     // pr_opened fires immediately as its own beat.
     expect(frameFeeds).toHaveLength(1);
-    // The 3-run of check_run events collapses to ONE beat: a single base
-    // dwell (1600ms) advances the frame, not 3x1600ms.
-    vi.advanceTimersByTime(1600);
+    // pr_opened's dwell = base (2400) + notable extension (1200) = 3600.
+    vi.advanceTimersByTime(3600);
     expect(frameFeeds).toHaveLength(2);
     // But all 3 underlying events were fed through the reducer and joined
     // the feed — state/round-trip fidelity is untouched by the batch.
     const batchFrame = frameFeeds[1];
     expect(batchFrame?.map((e) => e.id)).toEqual(["a", "c1", "c2", "c3"]);
-    // Confirm it didn't take 2 more dwells to get here (i.e. it wasn't
-    // still rendering per-event) — advancing only 1 more base dwell moves
-    // on to the final review_posted beat.
-    vi.advanceTimersByTime(1600);
+    // The 3-run of check_run events collapses to ONE beat at a single base
+    // dwell (2400ms, not 3x2400ms) — and a batch of green/skipped check_run
+    // events is never notable (never red), so no extension applies here.
+    vi.advanceTimersByTime(2400);
     expect(frameFeeds).toHaveLength(3);
     expect(onDone).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
@@ -512,7 +527,9 @@ describe("ReplayPlayer", () => {
     });
     player.start();
     expect(frameFeeds).toHaveLength(1); // c1 fires immediately, unbatched
-    vi.advanceTimersByTime(1600);
+    // c1 is a lone (non-batched) green check_run: base dwell (2400), not
+    // notable — no extension.
+    vi.advanceTimersByTime(2400);
     expect(frameFeeds).toHaveLength(2); // c2 fires as its own beat
     expect(onDone).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
@@ -598,10 +615,171 @@ describe("ReplayPlayer", () => {
     player.start();
     expect(frameFeeds).toHaveLength(1); // first beat (a1-a3) fires immediately
     expect(frameFeeds[0]?.map((e) => e.id)).toEqual(["a1", "a2", "a3"]);
-    vi.advanceTimersByTime(1600); // one base dwell — the second beat's whole cost
+    // One base dwell (2400ms) — the a-run batch's whole cost; a batch of
+    // green/skipped check_run events is never notable, so no extension.
+    vi.advanceTimersByTime(2400);
     expect(frameFeeds).toHaveLength(2);
     expect(frameFeeds[1]?.map((e) => e.id)).toEqual(["a1", "a2", "a3", "b1", "b2", "b3"]);
     expect(onDone).toHaveBeenCalledTimes(1);
     vi.useRealTimers();
+  });
+
+  // Dedicated unit coverage for the notable-beat dwell extension (2026-07-27
+  // pairing): a beat's raw dwell gets +NOTABLE_EXTENSION_MS (1200ms) when
+  // it's a state change worth pausing on, not CI noise. buildBeats/
+  // scheduleDwells aren't exported, so — matching this file's existing
+  // convention (see the batching tests above) — these observe the effect
+  // through ReplayPlayer's actual fire-to-fire timing under fake timers.
+  describe("notable-beat dwell extension", () => {
+    const bundleOf = (events: PublicEvent[]): ReplayBundle => ({
+      id: "notable",
+      title: "notable",
+      captured_on: "2026-07-25",
+      pr: 42,
+      events,
+    });
+
+    it("a non-check_run event is always notable — dwell includes the extension", () => {
+      vi.useFakeTimers();
+      const events: PublicEvent[] = [
+        {
+          id: "a",
+          at: "2026-07-25T00:00:00Z",
+          droid: "hk-47",
+          kind: "review_started",
+          pr: 42,
+          summary: "HK-47 review started · PR #42",
+        },
+        {
+          id: "b",
+          at: "2026-07-25T00:01:00Z",
+          droid: "hk-47",
+          kind: "review_posted",
+          pr: 42,
+          summary: "review APPROVED · PR #42",
+        },
+      ];
+      const frames: number[] = [];
+      const player = new ReplayPlayer(bundleOf(events), {
+        onFrame: () => frames.push(1),
+        onDone: () => {},
+      });
+      player.start();
+      expect(frames).toHaveLength(1);
+      // base (2400) + notable extension (1200) = 3600, not the bare 2400 a
+      // noise beat would use.
+      vi.advanceTimersByTime(3599);
+      expect(frames).toHaveLength(1);
+      vi.advanceTimersByTime(1);
+      expect(frames).toHaveLength(2);
+      vi.useRealTimers();
+    });
+
+    it("a green/skipped check_run beat is noise — dwell has no extension", () => {
+      vi.useFakeTimers();
+      const events: PublicEvent[] = [
+        {
+          id: "a",
+          at: "2026-07-25T00:00:00Z",
+          droid: "hk-47",
+          kind: "check_run",
+          pr: 42,
+          summary: "CI passed (build) · PR #42",
+        },
+        {
+          id: "b",
+          at: "2026-07-25T00:01:00Z",
+          droid: "hk-47",
+          kind: "check_run",
+          pr: 42,
+          summary: "CI skipped (lint) · PR #42",
+        },
+      ];
+      const frames: number[] = [];
+      const player = new ReplayPlayer(bundleOf(events), {
+        onFrame: () => frames.push(1),
+        onDone: () => {},
+      });
+      player.start();
+      expect(frames).toHaveLength(1);
+      // base (2400) only — no extension for a non-red check_run.
+      vi.advanceTimersByTime(2400);
+      expect(frames).toHaveLength(2);
+      vi.useRealTimers();
+    });
+
+    it("a check_run whose summary starts with 'CI red' is notable — 2-1B activating is a state change", () => {
+      vi.useFakeTimers();
+      const events: PublicEvent[] = [
+        {
+          id: "a",
+          at: "2026-07-25T00:00:00Z",
+          droid: "2-1b",
+          kind: "check_run",
+          pr: 42,
+          summary: "CI red (test-unit) · PR #42",
+        },
+        {
+          id: "b",
+          at: "2026-07-25T00:01:00Z",
+          droid: "2-1b",
+          kind: "check_run",
+          pr: 42,
+          summary: "CI skipped (build) · PR #42",
+        },
+      ];
+      const frames: number[] = [];
+      const player = new ReplayPlayer(bundleOf(events), {
+        onFrame: () => frames.push(1),
+        onDone: () => {},
+      });
+      player.start();
+      expect(frames).toHaveLength(1);
+      // base (2400) + notable extension (1200) = 3600, because the red
+      // conclusion is itself a state change even though the kind is
+      // check_run.
+      vi.advanceTimersByTime(3599);
+      expect(frames).toHaveLength(1);
+      vi.advanceTimersByTime(1);
+      expect(frames).toHaveLength(2);
+      vi.useRealTimers();
+    });
+
+    it("a batched run stays at base dwell even though every event kind is check_run", () => {
+      vi.useFakeTimers();
+      const checkRun = (id: string, at: string): PublicEvent => ({
+        id,
+        at,
+        droid: "system",
+        kind: "check_run",
+        pr: 42,
+        summary: `CI passed (${id}) · PR #42`,
+      });
+      const events: PublicEvent[] = [
+        checkRun("c1", "2026-07-25T00:00:00Z"),
+        checkRun("c2", "2026-07-25T00:00:01Z"),
+        checkRun("c3", "2026-07-25T00:00:02Z"),
+        {
+          id: "z",
+          at: "2026-07-25T00:00:03Z",
+          droid: "hk-47",
+          kind: "review_posted",
+          pr: 42,
+          summary: "review APPROVED · PR #42",
+        },
+      ];
+      const frames: number[] = [];
+      const player = new ReplayPlayer(bundleOf(events), {
+        onFrame: () => frames.push(1),
+        onDone: () => {},
+      });
+      player.start();
+      expect(frames).toHaveLength(1);
+      // The 3-run collapses to one beat at base dwell (2400) — batching
+      // guarantees no red event is inside the run, so no extension applies.
+      vi.advanceTimersByTime(2400);
+      expect(frames).toHaveLength(2);
+      vi.useRealTimers();
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DMD_W, blank } from "./frame.js";
+import { DMD_W, type Frame, blank } from "./frame.js";
 import { type DmdState, type GlyphCounts, dmdFrame, standbyGlyphs } from "./glyphs.js";
 
 const DROIDS = ["hk-47", "2-1b", "tt-8l", "ev-9d9", "r5", "copilot"] as const;
@@ -254,11 +254,43 @@ describe("hk-47 desk", () => {
     expect(Array.from(a)).not.toEqual(Array.from(b));
     expect(Array.from(a)).not.toEqual(Array.from(c));
   });
-  it("domain is dimmer than active and sheetless (static between animation ticks)", () => {
-    const d1 = dmdFrame("hk-47", "domain", 500, { primary: 2, secondary: 0 });
-    const d2 = dmdFrame("hk-47", "domain", 731, { primary: 2, secondary: 0 });
-    expect(Array.from(d1)).toEqual(Array.from(d2)); // no motion in domain
-    expect(Math.max(...Array.from(d1))).toBeLessThanOrEqual(2);
+  // Controller ruling (2026-07-27, replay-liveliness pairing): the original
+  // fully-static domain rule is relaxed — ambient motion (droid presence
+  // breathing) is now allowed, but there must still be no SHEET/WORK motion,
+  // and the shipped intensity caps still hold. Replaces the old d1≡d2 static
+  // pin with three narrower pins: (a) domain frames differ across tMs, (b)
+  // the sheet's travel region — the gaps between the inbox/outbox trays and
+  // the desk, columns no furniture or tray ever reaches, where only a
+  // mid-flight sheet could ever place a pixel — stays fully unlit at every
+  // sampled tMs across a full cycle, (c) intensity caps hold throughout.
+  it("domain is dimmer than active, sheetless, and ambient-alive (not static)", () => {
+    const counts = { primary: 2, secondary: 0 };
+    const samples = [0, 500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000];
+    const frames = samples.map((t) => dmdFrame("hk-47", "domain", t, counts));
+
+    // (a) domain frames DO differ across tMs now.
+    const distinct = new Set(frames.map((f) => Array.from(f).join(",")));
+    expect(distinct.size).toBeGreaterThan(1);
+
+    for (const f of frames) {
+      // (b) sheet travel region: x in [15,20) sits strictly between the
+      // inbox tray's right edge (x=14) and the desk's left edge (x=20); x in
+      // [45,50) sits strictly between the desk's right edge (x=44) and the
+      // outbox tray's left edge (x=50). Neither furniture nor a tray fill
+      // ever reaches these columns — only drawHkSheet (not called in domain)
+      // would. Checked across the full frame height.
+      for (const [lo, hi] of [
+        [15, 20],
+        [45, 50],
+      ] as const) {
+        for (let x = lo; x < hi; x++) {
+          for (let y = 0; y < 32; y++) expect(f[y * DMD_W + x] ?? 0).toBe(0);
+        }
+      }
+      // (c) intensity caps hold: bulk <=2 (and, since the sheet's v=3
+      // flicker accent is never drawn here, no v=3 pixel exists at all).
+      expect(Math.max(...f)).toBeLessThanOrEqual(2);
+    }
   });
   it("standby is calm (<=2) and deterministic", () => {
     expect(Array.from(dmdFrame("hk-47", "idle", 100))).toEqual(
@@ -332,4 +364,40 @@ describe("r5 weld line", () => {
       expect(bright).toBeLessThanOrEqual(2);
     }
   });
+});
+
+// LIVELINESS BAR (controller ruling, replay-liveliness pairing, 2026-07-27):
+// the root-cause debug report measured hk-47's pre-purview idle glyph
+// changing ~1.0×/s versus ~0.2×/s post-purview — a ~5x drop from a "row
+// count breathes" idiom collapsing to a single binary intensity toggle.
+// This pins the restored bar deterministically: sampling a glyph at 500ms
+// intervals over a 6s window (13 samples, matching the report's own probe
+// cadence) must surface at least 6 DISTINCT frames — approximately the
+// >=1-visible-change/sec the pre-purview glyphs had. Run for every glyph
+// this pairing touched (hk-47/tt-8l/r5 standby, hk-47 domain) plus ev-9d9
+// (untouched — already had a continuous sweep — verified here rather than
+// assumed).
+function distinctFrameCount(render: (tMs: number) => Frame): number {
+  const seen = new Set<string>();
+  for (let i = 0; i < 13; i++) seen.add(Array.from(render(i * 500)).join(","));
+  return seen.size;
+}
+
+describe("liveliness bar — calm glyphs show >=1 visible change/sec", () => {
+  const cases: Array<[string, (t: number) => Frame]> = [
+    ["hk-47 standby", (t) => dmdFrame("hk-47", "idle", t)],
+    ["tt-8l standby", (t) => dmdFrame("tt-8l", "idle", t)],
+    ["r5 standby", (t) => dmdFrame("r5", "idle", t)],
+    ["ev-9d9 standby", (t) => dmdFrame("ev-9d9", "idle", t)],
+    ["hk-47 domain", (t) => dmdFrame("hk-47", "domain", t, { primary: 2, secondary: 2 })],
+  ];
+  for (const [label, render] of cases) {
+    it(`${label}: at least 6 distinct frames across 13 samples over 6s`, () => {
+      expect(distinctFrameCount(render)).toBeGreaterThanOrEqual(6);
+    });
+  }
+  // 2-1b's standby is intentionally left byte-identical pending a separate
+  // redesign spec — NOT held to this bar yet, and NOT touched by this
+  // pairing. Documented here so its absence from the cases list above reads
+  // as a deliberate exclusion, not an oversight.
 });

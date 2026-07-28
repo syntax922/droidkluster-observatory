@@ -41,8 +41,42 @@ function breath(tMs: number, periodMs: number): 1 | 2 {
   return (1 + Math.round((Math.cos((tMs / periodMs) * Math.PI * 2) + 1) / 2)) as 1 | 2;
 }
 
+// Continuous ambient motion for calm (standby) glyphs: a triangle wave over
+// `periodMs` quantized to `steps` (0..steps-1) integer levels, rising then
+// falling. Unlike `breath` (a binary 1..2 toggle), this is the "old idiom"
+// restored — many intermediate spatial states per cycle, e.g. a tray filling
+// then clearing item-by-item — so a standby glyph reads as continuously
+// alive rather than a single element flipping between two frames.
+function breathSteps(tMs: number, periodMs: number, steps: number): number {
+  const half = periodMs / 2;
+  const phase = tMs % periodMs;
+  const rising = phase <= half ? phase / half : (periodMs - phase) / half;
+  return Math.round(rising * (steps - 1));
+}
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
+}
+
+// Shared "idling conveyor" ambient element for tt-8l and r5's standby
+// glyphs: sparse v=2 accent dots, one every 6px, drifting 1px/sec along `y`
+// on top of the belt's own static v=1 line (px() takes the max, so this only
+// brightens specific cells — it never erases the belt). Skips any x in
+// [skipLo, skipHi) so a fixture (e.g. r5's weld arch) reads as something the
+// belt runs under, not through. Changes exactly once per second — the same
+// ~1 visible-change/sec cadence the pre-purview idle glyphs had.
+function drawDriftingAccent(
+  f: Frame,
+  y: number,
+  tMs: number,
+  skipLo?: number,
+  skipHi?: number,
+): void {
+  const offset = Math.floor(tMs / 1000) % 6;
+  for (let x = offset; x < DMD_W; x += 6) {
+    if (skipLo !== undefined && skipHi !== undefined && x >= skipLo && x < skipHi) continue;
+    px(f, x, y, 2);
+  }
 }
 
 function staleFrame(tMs: number): Frame {
@@ -105,12 +139,16 @@ const HK_OUTBOX_X0 = 50;
 const HK_OUTBOX_X1 = 60;
 const HK_TRAY_Y = 17;
 
-function drawHkFurniture(f: Frame, deskV: number, headShoulderV: number): void {
+// `shoulderExpand` (default 0, unused by active/standby — only the domain
+// ambient-presence glyph passes it) widens the shoulders symmetrically in
+// place, for a "breathing" spatial cue without changing intensity. 0 leaves
+// the geometry byte-identical to before this param existed.
+function drawHkFurniture(f: Frame, deskV: number, headShoulderV: number, shoulderExpand = 0): void {
   hline(f, HK_DESK_X0, HK_DESK_X1, HK_DESK_Y, deskV);
   vline(f, 22, 19, 22, 1);
   vline(f, 42, 19, 22, 1);
   fillRect(f, 30, 8, 5, 4, headShoulderV); // head
-  fillRect(f, 28, 12, 9, 5, headShoulderV); // shoulders
+  fillRect(f, 28 - shoulderExpand, 12, 9 + shoulderExpand * 2, 5, headShoulderV); // shoulders
 }
 
 // A tray of `count` items (clamped 0-6) stacked upward from the tray-bottom
@@ -420,14 +458,21 @@ function blastOffFrame(elapsedMs: number): Frame {
   return f;
 }
 
-// hk-47 — domain: the same desk, dimmed and frozen. No sheet, no flicker —
-// domain instruments are quiet-monitoring, not a live animation — so this
-// glyph is intentionally pure-function-of-counts with tMs unused. Inbox and
-// outbox still scale with purview counts (same clamp(0,6) as active) so
-// review backlog reads at a glance; head/shoulders drop to v=1.
-domainGlyphs["hk-47"] = (_t, counts) => {
+// hk-47 — domain: the same desk, dimmed, with no sheet and no work motion —
+// domain instruments are quiet-monitoring, not a live review. Controller
+// ruling (2026-07-27) relaxed the original fully-static rule: ambient motion
+// is allowed as long as it never touches the sheet's travel region (no
+// reviewing happening) and stays within the shipped intensity caps. The
+// droid's own shoulders breathe 0..6 spatial steps on the same 5s triangle
+// wave as the standby tray idiom (breathSteps) — "someone is still at the
+// desk," spatially alive rather than a single intensity toggle (a binary
+// breath() here would only ever produce 2 distinct frames). Max expand
+// (6px) keeps the shoulders well clear of the sheet's travel-region columns
+// (15-20, 45-50) at every phase. Inbox/outbox stay purely count-driven
+// (review backlog reads at a glance, same clamp(0,6) as active).
+domainGlyphs["hk-47"] = (t, counts) => {
   const f = blank();
-  drawHkFurniture(f, 2, 1);
+  drawHkFurniture(f, 2, 2, breathSteps(t, 5000, 7));
   drawHkTray(f, HK_INBOX_X0, HK_INBOX_X1, counts.primary, 2);
   drawHkTray(f, HK_OUTBOX_X0, HK_OUTBOX_X1, counts.secondary, 2);
   return f;
@@ -457,19 +502,23 @@ domainGlyphs.r5 = (t, counts) => {
 // active station surrounded by identical placeholders. Max intensity 2,
 // periods in the 4-6s range — deliberately calmer than any active glyph.
 export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
-  // hk-47 — the desk at rest: furniture + droid at v=1, both trays empty
-  // (tray-bottom lines only). The inbox tray-bottom is the one breathing
-  // element (1..2 on 5s) — the only sign anything might arrive.
+  // hk-47 — the desk at rest: furniture + droid at v=1, both trays empty.
+  // Ambient element: the inbox tray FILL COUNT breathes 0..6 items on a 5s
+  // triangle wave (the pre-purview "row count varies" idiom, restored, sized
+  // to the tray's own natural range) — spatially it reads as paper
+  // arriving/clearing a sheet at a time, not one line toggling brightness.
   "hk-47": (t) => {
     const f = blank();
     drawHkFurniture(f, 1, 1);
-    hline(f, HK_INBOX_X0, HK_INBOX_X1, HK_TRAY_Y, breath(t, 5000));
+    drawHkTray(f, HK_INBOX_X0, HK_INBOX_X1, breathSteps(t, 5000, 7), 2);
     hline(f, HK_OUTBOX_X0, HK_OUTBOX_X1, HK_TRAY_Y, 1);
     return f;
   },
 
   // 2-1b — flat baseline (no QRS spike) with a single small blip crossing
   // once per 5s, instead of the active trace's continuous scroll+spike.
+  // (Byte-identical to the pre-purview design — 2-1b's standby is up for a
+  // separate redesign; not touched here.)
   "2-1b": (t) => {
     const f = blank();
     hline(f, 0, DMD_W - 1, 16, 1);
@@ -479,11 +528,14 @@ export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
     return f;
   },
 
-  // tt-8l — the belt at rest: no boxes moving, just an empty flat-packed
-  // box outline breathing 1..2 on 5s.
+  // tt-8l — the belt at rest: no boxes moving, an empty flat-packed box
+  // outline breathing 1..2 on 5s, plus the shared idling-conveyor accent
+  // (drawDriftingAccent) drifting along the belt line so the belt itself
+  // reads as idling rather than a still photograph.
   "tt-8l": (t) => {
     const f = blank();
     hline(f, 0, DMD_W - 1, 22, 1);
+    drawDriftingAccent(f, 22, t);
     rect(f, 26, 16, 12, 6, breath(t, 5000));
     return f;
   },
@@ -507,10 +559,13 @@ export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
   },
 
   // r5 — the belt stopped, one chassis parked under the arch. The chassis
-  // outline breathes 1..2 on 5s as the only sign of readiness.
+  // outline breathes 1..2 on 5s, plus the shared idling-conveyor accent
+  // (drawDriftingAccent) drifting along the belt — skipping the arch span so
+  // the drift reads as running under the fixture, not through it.
   r5: (t) => {
     const f = blank();
     drawR5Belt(f, 1, 1);
+    drawDriftingAccent(f, R5_BELT_Y, t, R5_ARCH_X, R5_ARCH_X + R5_ARCH_W);
     rect(f, 27, R5_CHASSIS_TOP, R5_CHASSIS_W, R5_CHASSIS_H, breath(t, 5000));
     return f;
   },
