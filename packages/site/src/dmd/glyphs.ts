@@ -241,11 +241,17 @@ function drawShippingBox(f: Frame, p: number): void {
       }
     }
   } else if (p < 0.7) {
+    // Tape pass: the sealed trail behind the gun stays bulk v=2 (the global
+    // domain rule caps v=3 to small accents, not a growing hline) — only the
+    // gun's leading edge gets a <=2px v=3 accent riding at its head.
     const tapeX = x + Math.round(((p - 0.5) / 0.2) * (boxW - 1));
-    hline(f, x, tapeX, boxTop, 3);
+    hline(f, x, tapeX, boxTop, 2);
+    px(f, tapeX, boxTop, 3);
+    if (tapeX - 1 >= x) px(f, tapeX - 1, boxTop, 3);
     fillRect(f, Math.max(x, tapeX - 1), boxTop - 2, 3, 2, 2);
   } else {
-    hline(f, x, x + boxW - 1, boxTop, 3);
+    // Sealed and static — the tape line is fully laid, no accent left to draw.
+    hline(f, x, x + boxW - 1, boxTop, 2);
   }
 }
 

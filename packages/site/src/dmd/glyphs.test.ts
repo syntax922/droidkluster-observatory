@@ -176,6 +176,9 @@ describe("2-1b domain ECG", () => {
     const bright = f.filter((v) => v === 3).length;
     expect(bright).toBeLessThanOrEqual(12); // tips only (<=2px per beat * 6 beats cap)
   });
+  it("beat count clamps at 6 — primary=6 and primary=10 render identically", () => {
+    expect(Array.from(dom(6))).toEqual(Array.from(dom(10)));
+  });
 });
 
 describe("tt-8l shipping department", () => {
@@ -187,6 +190,18 @@ describe("tt-8l shipping department", () => {
     const one = dmdFrame("tt-8l", "domain", 700, { primary: 1, secondary: 0 });
     const three = dmdFrame("tt-8l", "domain", 700, { primary: 3, secondary: 0 });
     expect(Array.from(one)).not.toEqual(Array.from(three));
+  });
+  it("box count clamps at 3 — primary=3 and primary=5 render identically", () => {
+    const three = dmdFrame("tt-8l", "domain", 700, { primary: 3, secondary: 0 });
+    const five = dmdFrame("tt-8l", "domain", 700, { primary: 5, secondary: 0 });
+    expect(Array.from(three)).toEqual(Array.from(five));
+  });
+  it("domain caps at intensity 3 only on <=2px accents per box (bulk <=2)", () => {
+    for (const t of [0, 400, 900, 1300, 1800, 2200, 2599]) {
+      const f = dmdFrame("tt-8l", "domain", t, { primary: 3, secondary: 0 });
+      const bright = f.filter((v) => v === 3).length;
+      expect(bright).toBeLessThanOrEqual(6); // 2px accent * 3 boxes max
+    }
   });
   it("celebrate is the blast-off, not the diamond rings", () => {
     const tt = dmdFrame("tt-8l", "celebrate", 900);
