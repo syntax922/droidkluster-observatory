@@ -26,11 +26,19 @@ export interface ReplayOpts {
 // person needs to read what happened, so pacing is keyed to comprehension
 // (a beat per event, longer for prose, longer still for a PR landing) rather
 // than to the wall-clock gap between the original events.
-const BASE_DWELL_MS = 1600;
+const BASE_DWELL_MS = 2400;
 const EXCERPT_DWELL_MS = 4200;
 const MERGE_DWELL_MS = 3000;
 const MAX_PLAYBACK_MS = 180_000;
 const MIN_DWELL_MS = 700;
+
+// Comprehension-aware extension (2026-07-27 pairing): a beat whose first
+// event represents an actual state change (anything but batched CI
+// green/skipped noise) gets extra dwell on top of its kind-specific base —
+// readers need longer to register "something happened" than to skim a CI
+// tick. Applies BEFORE scheduleDwells' MAX_PLAYBACK_MS scale-down, same as
+// every other raw dwell.
+const NOTABLE_EXTENSION_MS = 1200;
 
 // Mirrors chains.ts's static-timeline batching threshold: a run of this
 // many-or-more consecutive system check_run events is CI noise, not a
@@ -47,6 +55,19 @@ function baseDwellFor(event: PublicEvent): number {
   if (event.excerpt) return EXCERPT_DWELL_MS;
   if (event.kind === "pr_merged" || event.kind === "pr_closed") return MERGE_DWELL_MS;
   return BASE_DWELL_MS;
+}
+
+// A beat is "notable" — worth the extra NOTABLE_EXTENSION_MS — unless it's a
+// check_run whose summary doesn't signal a red build. That covers every
+// other event kind unconditionally (a review, a merge, a dispatch — all
+// state changes worth pausing on) plus a check_run that specifically went
+// red (2-1B activating is itself a state change). A batched run of
+// green/skipped check_run events is, by construction, never red (a red
+// check_run breaks batching — see buildBeats), so batched beats always stay
+// at base dwell.
+function isNotableBeat(firstEvent: PublicEvent): boolean {
+  if (firstEvent.kind !== "check_run") return true;
+  return firstEvent.summary.startsWith("CI red");
 }
 
 function isBatchableCheckRun(event: PublicEvent): boolean {
@@ -82,12 +103,21 @@ function buildBeats(events: PublicEvent[]): Beat[] {
       }
       const run = events.slice(i, j);
       if (run.length >= BATCH_MIN_RUN) {
-        beats.push({ events: run, rawDwell: BASE_DWELL_MS });
+        const first = run[0] as PublicEvent;
+        beats.push({
+          events: run,
+          rawDwell: BASE_DWELL_MS + (isNotableBeat(first) ? NOTABLE_EXTENSION_MS : 0),
+        });
         i = j;
         continue;
       }
     }
-    if (event) beats.push({ events: [event], rawDwell: baseDwellFor(event) });
+    if (event) {
+      beats.push({
+        events: [event],
+        rawDwell: baseDwellFor(event) + (isNotableBeat(event) ? NOTABLE_EXTENSION_MS : 0),
+      });
+    }
     i++;
   }
   return beats;
