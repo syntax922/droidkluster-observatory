@@ -305,17 +305,19 @@ function drawPqrst(
   // for the topmost lit row per column and thresholds at y<6 to isolate the
   // R-spike. The R upstroke->tip bridge (dx 8->9, a steep 5-row climb in one
   // x-step) is steep enough that it ALSO dips below that threshold at dx=8
-  // (one column left of the tip's own dx=9-10) — verified empirically, not
-  // just by the two-endpoints-only Bresenham read a quick glance suggests.
-  // rColumns' adjacency dedup therefore locks onto dx=8, not dx=9, as "the"
-  // R column. So the P peak (dx=2) sits 6 columns before the detected R
-  // column, not 7 — the discriminator window in the test suite is centered
-  // on that empirically-verified -6, with margin, not on the geometric
-  // dx-delta alone. See the "2-1b PQRST" describe block's
-  // recalibration-proof test and its bridge-crossing plant (which pins the
-  // Q->R-upstroke bridge's OWN baseline-2 crossing, at relative offset 0 —
-  // the artifact this note is warning about — to prove the window excludes
-  // it).
+  // (one column left of the tip's own dx=9-10) — verified empirically.
+  // Fix round 1 (hardening, 2026-07-28): rColumns() now groups adjacent
+  // below-threshold columns and reports each group's TRUE apex (its own
+  // minimum-y pixel) rather than the first column encountered in the
+  // group — that decouples "the" R column from the upstroke bridge's exact
+  // steepness, so it correctly resolves to dx=9 (the tip's own start, a
+  // 2-way tie with dx=10 broken to the first), not dx=8. The P peak (dx=2)
+  // sits 7 columns before that apex column. The discriminator window in the
+  // test suite is centered on that empirically-verified -7. See the
+  // "2-1b PQRST" describe block's recalibration-proof test and its
+  // bridge-crossing plant (which pins the Q->R-upstroke bridge's OWN
+  // baseline-2 crossing, at relative offset -1 from the apex column — the
+  // artifact this note is warning about — to prove the window excludes it).
   put(0, 0, v);
   put(1, -1, v, true);
   put(2, -2, v, true); // P peak
@@ -368,7 +370,8 @@ function drawAfibWavelets(f: Frame, baselineY: number, tMs: number): void {
 
 // One AFib complex: no P wave, just a narrow Q-R-S (the irregular timing
 // lives in the caller). `ampAdjust` varies the R-wave height ±2px from the
-// contract's 11px base, clamped to stay a legible spike. Tip is 2px wide
+// contract's 11px base, clamped to stay a legible spike AND to the
+// available headroom off `baselineY` (see below). Tip is 2px wide
 // (x, x+1) at `tipV`, matching the same accent budget as the sinus R-tip.
 //
 // Morphology wave (2026-07-28): raised the base height (9->11, so AFib's R
@@ -377,6 +380,17 @@ function drawAfibWavelets(f: Frame, baselineY: number, tMs: number): void {
 // merits — not just "irregular", but visibly a well-formed-if-chaotic spike
 // train, contrasting against sinus's rounded P/T rather than looking like a
 // degenerate scribble next to it.
+//
+// Fix round 1, P1 (2026-07-28): the height budget used to be a flat
+// clamp(.., 8, 14) regardless of baseline. At the domain baseline (y=12), a
+// jittered h of 13-14 sends the tip to y<=-1 — px()'s bounds check silently
+// no-ops it, so the beat rendered flat-topped with ZERO v=3 pixels (a
+// reviewer sweep found this in ~10.5% of frames at primary=1). The active
+// baseline (y=16) had enough headroom (min tip y=2) to never trigger it.
+// Fix: cap h so the tip never goes above row 1 (`baselineY - 1`), which
+// COMPRESSES the jitter range at low baselines (domain: h ∈ [8,11], since
+// min(14, 12-1)=11) rather than deleting the variation outright — active
+// keeps its full [8,14] range unchanged (min(14, 16-1)=14).
 function drawAfibComplex(
   f: Frame,
   x: number,
@@ -385,7 +399,7 @@ function drawAfibComplex(
   tipV: number,
   ampAdjust: number,
 ): void {
-  const h = clamp(11 + ampAdjust, 8, 14);
+  const h = clamp(11 + ampAdjust, 8, Math.min(14, baselineY - 1));
   // Same bridging shape as drawPqrst's QRS (see tracePointPlotter) — no P
   // wave here (that's the point: AFib has none), so the whole complex is
   // one continuous Q-R-S stroke with no flat gaps to skip.
