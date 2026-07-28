@@ -173,12 +173,18 @@ describe("2-1b PQRST", () => {
     dmdFrame("2-1b", "domain", 480, { primary: n, secondary: amiss });
   const DOMAIN_BASELINE_Y = 12;
 
-  // Shared R-column finder: only the R-spike tip reaches y<6 (P/Q/S/T never
-  // do, at either baseline used by 2-1b's states), so scanning for the
-  // topmost lit row per column and thresholding at 6 isolates R-tip columns.
-  // Adjacent columns within the same tip (drawPqrst/drawAfibComplex both
-  // draw 2px-wide tips) collapse to their first column so each beat counts
-  // once.
+  // Shared R-column finder: only the R spike (tip AND its steep upstroke
+  // bridge) reaches y<6 (P/Q/S/T never do, at either baseline used by
+  // 2-1b's states), so scanning for the topmost lit row per column and
+  // thresholding at 6 isolates R-related columns. drawPqrst's R
+  // upstroke->tip bridge (dx 8->9, a steep 5-row climb in one x-step) is
+  // steep enough to ALSO dip below y<6 at dx=8, one column before the
+  // tip's own dx=9-10 (verified empirically — the Bresenham split for a
+  // 1-column/5-row bridge puts 3 of its intermediate rows on the START
+  // column) — so the group of columns collapsing into "the" R column is
+  // {upstroke, tip, tip} for sinus and its AFib analogue, not just the tip
+  // pixels alone. Adjacent columns within the same R spike collapse to
+  // their first column (the upstroke column) so each beat counts once.
   function rColumns(f: Frame): number[] {
     const cols: number[] = [];
     for (let x = 0; x < DMD_W; x++) {
@@ -189,16 +195,23 @@ describe("2-1b PQRST", () => {
     return cols.filter((x, i) => i === 0 || x - (cols[i - 1] as number) > 2);
   }
 
-  // P-wave discriminator. drawPqrst's P wave peaks at baseline-2 (dx=1
-  // relative to the complex's xOrigin), 5 columns before the R-tip column
-  // (dx=6, the first of the tip's 2 tied columns that rColumns() keeps).
-  // AFib's fibrillatory baseline jitter is contractually only ±1px (see
-  // drawAfibWavelets), so it can never reach baseline-2 — a lit pixel
-  // exactly 2px above baseline, in the 4-column window ending 3 columns
-  // before an R-tip column, is provably a genuine P wave, not jitter noise.
+  // P-wave discriminator (recalibrated for the morphology wave, 2026-07-28:
+  // P widened from a 2-point bump to a 5-column rounded arc peaking at
+  // baseline-2, dx=2 relative to the complex's xOrigin). AFib's
+  // fibrillatory baseline jitter is contractually only ±1px (see
+  // drawAfibWavelets), so it can never reach baseline-2 — but the window is
+  // NOT simply "dx-delta to the tip's own start column", because
+  // rColumns() (see its comment above) locks onto the R-upstroke column,
+  // one column left of the tip. Empirically the P peak sits exactly 6
+  // columns before THAT column (not 7) — verified by direct frame
+  // inspection, not derived from the authored dx values alone. The window
+  // is centered on that measured offset with a 2-column margin on each
+  // side; the plant test below proves the margin doesn't swallow the
+  // Q->R-upstroke bridge's own baseline-2 crossing (which lands at relative
+  // offset 0 — see drawPqrst's NOTE comment).
   function pRegionLit(f: Frame, rCol: number, baselineY: number): boolean {
     const row = baselineY - 2;
-    for (let dx = -6; dx <= -3; dx++) {
+    for (let dx = -8; dx <= -5; dx++) {
       const x = rCol + dx;
       if (x >= 0 && x < DMD_W && (f[row * DMD_W + x] ?? 0) > 0) return true;
     }
@@ -230,6 +243,37 @@ describe("2-1b PQRST", () => {
     for (const rCol of afibRs) expect(pRegionLit(afib, rCol, DOMAIN_BASELINE_Y)).toBe(false);
   });
 
+  // Recalibration plant (morphology wave, 2026-07-28): proves the P-window
+  // move to [-8,-5] isn't vacuously passing. The Q->R-upstroke bridge (see
+  // drawPqrst's NOTE comment) genuinely DOES cross row baseline-2, at
+  // relative offset 0 (i.e. AT the detected R column itself, not near it) —
+  // in BOTH rhythms, since drawAfibComplex's Q->upstroke bridge has the
+  // same steep 1-column/6-row shape. First confirm the crossing is real (so
+  // this isn't testing nothing), then confirm the window excludes it.
+  it("P-window survives the Q->R-upstroke bridge's own baseline-2 crossing (recalibration plant)", () => {
+    for (const amiss of [0, 1] as const) {
+      const f = dom(2, amiss) as Frame;
+      const row = DOMAIN_BASELINE_Y - 2;
+      for (const rCol of rColumns(f)) {
+        // The bridge artifact is real: the R column itself is lit at
+        // baseline-2 (offset 0).
+        expect(f[row * DMD_W + rCol] ?? 0).toBeGreaterThan(0);
+      }
+    }
+    // And the discriminator still tells the rhythms apart correctly despite
+    // that shared artifact sitting right at offset 0.
+    expect(
+      rColumns(dom(2, 0) as Frame).every((c) =>
+        pRegionLit(dom(2, 0) as Frame, c, DOMAIN_BASELINE_Y),
+      ),
+    ).toBe(true);
+    expect(
+      rColumns(dom(2, 1) as Frame).some((c) =>
+        pRegionLit(dom(2, 1) as Frame, c, DOMAIN_BASELINE_Y),
+      ),
+    ).toBe(false);
+  });
+
   it("AFib R-R intervals are irregularly irregular; sinus intervals are equal", () => {
     const sinusSpikes = rColumns(dom(3, 0) as Frame);
     const afibSpikes = rColumns(dom(3, 1) as Frame);
@@ -253,13 +297,68 @@ describe("2-1b PQRST", () => {
   it("domain intensity caps hold in BOTH rhythms", () => {
     for (const amiss of [0, 1]) {
       const f = dom(3, amiss);
-      expect(f.filter((v) => v === 3).length).toBeLessThanOrEqual(6); // ≤2px × 3 beats
+      // Sinus (amiss=0) renders at most 2 beats post-rescale (≤2px × 2);
+      // AFib (amiss=1) is unchanged, up to the shared clamp(1,6) (≤2px × 3
+      // here since primary=3). Same upper bound covers both without needing
+      // to branch the assertion on rhythm.
+      expect(f.filter((v) => v === 3).length).toBeLessThanOrEqual(6);
     }
   });
 
   it("ceiling clamp still holds in both rhythms", () => {
+    // Sinus: the beat-count rescale (morphology wave, 2026-07-28) replaced
+    // clamp(primary,1,6) with clamp(primary,1,2) FOR BEAT COUNT, but the R-R
+    // SPACING that conveys load (drawSinusBeats) saturates at the same
+    // primary=6 point the old cap used — so this invariant survives
+    // unchanged in form: primary=6 and primary=10 still render identically,
+    // just because the spacing formula's own clamp(primary,2,6) saturates,
+    // not because the beat count does (that saturates already at primary=2).
     expect(Array.from(dom(6, 0))).toEqual(Array.from(dom(10, 0)));
+    // AFib: untouched by the rescale — same clamp(1,6) as before.
     expect(Array.from(dom(6, 1))).toEqual(Array.from(dom(10, 1)));
+  });
+
+  // Beat-count rescale (morphology wave, 2026-07-28): pins the new mapping
+  // directly, separate from the ceiling-clamp invariant above.
+  describe("sinus beat-count rescale", () => {
+    it("renders at most 2 full complexes at any primary, unlike AFib's up-to-6", () => {
+      for (const primary of [1, 2, 3, 4, 6, 10]) {
+        const sinusRs = rColumns(dom(primary, 0) as Frame);
+        expect(sinusRs.length).toBeLessThanOrEqual(2);
+      }
+      // AFib at the same primary values can exceed 2 (it's still clamp(1,6)).
+      const afibRs = rColumns(dom(6, 1) as Frame);
+      expect(afibRs.length).toBeGreaterThan(2);
+    });
+
+    it("primary<=1 renders a single complex; primary>=2 renders two", () => {
+      expect(rColumns(dom(1, 0) as Frame).length).toBe(1);
+      expect(rColumns(dom(2, 0) as Frame).length).toBe(2);
+    });
+
+    it("R-R spacing between the two beats shrinks as primary rises from 2 to 6 (honest load signal)", () => {
+      const gapAt = (primary: number) => {
+        const cols = rColumns(dom(primary, 0) as Frame);
+        expect(cols.length).toBe(2);
+        return (cols[1] as number) - (cols[0] as number);
+      };
+      const gapLow = gapAt(2);
+      const gapMid = gapAt(4);
+      const gapHigh = gapAt(6);
+      expect(gapLow).toBeGreaterThan(gapMid);
+      expect(gapMid).toBeGreaterThan(gapHigh);
+      // Never compresses enough for the two 22px-footprint complexes to
+      // visually merge (26px min gap, per drawSinusBeats' own contract).
+      expect(gapHigh).toBeGreaterThanOrEqual(24); // ±2 for rCol landing on the upstroke column, not xOrigin
+    });
+
+    it("spacing saturates at primary=6 — primary=6 and primary=10 have identical R-R gap", () => {
+      const gapAt = (primary: number) => {
+        const cols = rColumns(dom(primary, 0) as Frame);
+        return (cols[1] as number) - (cols[0] as number);
+      };
+      expect(gapAt(6)).toBe(gapAt(10));
+    });
   });
 
   it("all 2-1b states stay in rows 0-23", () => {
