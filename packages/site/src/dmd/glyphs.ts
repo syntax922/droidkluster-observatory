@@ -77,6 +77,13 @@ export const activeGlyphs: Partial<Record<DroidId, (tMs: number) => Frame>> = {}
 export const domainGlyphs: Partial<Record<DroidId, (tMs: number, counts: GlyphCounts) => Frame>> =
   {};
 
+// Wrap a coordinate into [0, DMD_W) — domain scenes scroll continuously and
+// need beat/box positions to re-enter from the opposite edge rather than
+// clip at the boundary.
+function wrapX(x: number): number {
+  return ((x % DMD_W) + DMD_W) % DMD_W;
+}
+
 // hk-47 — reviewing: document outline, text stipple, bright scanline sweeping down.
 activeGlyphs["hk-47"] = (t) => {
   const f = blank();
@@ -103,13 +110,39 @@ activeGlyphs["2-1b"] = (t) => {
   return f;
 };
 
-// tt-8l — deciding: gate bars that part and close on a 2s cycle.
+// Shared rocket silhouette for tt-8l's active (loading) and celebrate
+// (blast-off) scenes — a triangular nose atop a 6-wide body with two fins,
+// nominally sitting with its body top at y=8 (riseY=0). `riseY` shifts the
+// whole rocket upward (used by blast-off's launch climb); the body's own
+// height (14) keeps the fins/nose offsets correct at any riseY.
+function drawRocketAt(f: Frame, riseY: number, v: number): void {
+  const bodyTop = 8 - riseY;
+  px(f, 50, bodyTop - 3, v);
+  px(f, 51, bodyTop - 3, v);
+  hline(f, 49, 52, bodyTop - 2, v);
+  hline(f, 48, 53, bodyTop - 1, v);
+  fillRect(f, 48, bodyTop, 6, 14, v);
+  px(f, 47, bodyTop + 14, v);
+  px(f, 46, bodyTop + 13, v);
+  px(f, 46, bodyTop + 12, v);
+  px(f, 54, bodyTop + 14, v);
+  px(f, 55, bodyTop + 13, v);
+  px(f, 55, bodyTop + 12, v);
+}
+
+// tt-8l — deciding: rocket loading. Crates march along the belt toward a
+// hatch beside the rocket and vanish (absorbed) rather than crossing it; the
+// hatch seam flickers to read as "receiving" traffic.
 activeGlyphs["tt-8l"] = (t) => {
   const f = blank();
-  const open = Math.round(((Math.sin((t / 2000) * Math.PI * 2) + 1) / 2) * 10); // 0..10
-  fillRect(f, 22 - open, 6, 6, 20, 2);
-  fillRect(f, 36 + open, 6, 6, 20, 2);
-  vline(f, 32, 4, 27, 1); // threshold line
+  hline(f, 40, 60, 22, 1);
+  drawRocketAt(f, 0, 2);
+  const speed = 60;
+  for (let i = 0; i < 4; i++) {
+    const bx = (Math.floor(t / speed) + i * 12) % 52;
+    if (bx <= 38) rect(f, bx, 16, 8, 6, 2);
+  }
+  if (Math.floor(t / 400) % 2 === 0) vline(f, 46, 14, 20, 3);
   return f;
 };
 
@@ -153,6 +186,106 @@ activeGlyphs.copilot = (t) => {
   return f;
 };
 
+// 2-1b — domain: load-scaled ECG. One QRS complex per active CI job
+// (clamped 1-6), evenly spaced and scrolling with the trace, baselined a
+// row above the active glyph's so the two read as distinct instruments.
+// Each beat's spike tip is exactly 2px at full intensity — the bulk of the
+// waveform stays at 2, keeping domain scenes readably dimmer than active.
+domainGlyphs["2-1b"] = (t, counts) => {
+  const f = blank();
+  hline(f, 0, DMD_W - 1, 12, 1);
+  const beats = Math.max(1, Math.min(6, counts.primary));
+  const scroll = Math.floor(t / 80) % DMD_W;
+  for (let i = 0; i < beats; i++) {
+    const cx = Math.floor(((i + 0.5) * DMD_W) / beats) + scroll;
+    px(f, wrapX(cx - 2), 8, 2);
+    px(f, wrapX(cx - 1), 4, 2);
+    px(f, wrapX(cx), 4, 3);
+    px(f, wrapX(cx + 1), 4, 3);
+    px(f, wrapX(cx + 2), 20, 2);
+    px(f, wrapX(cx + 3), 12, 2);
+  }
+  return f;
+};
+
+// tt-8l shipping-department box states, driven by phase p in [0, 1) of the
+// per-box cycle. Body is a fixed 12x8 outline at y=14; only its x position
+// and the top-edge treatment (open flaps / closing flaps / tape pass /
+// sealed) change across the phase.
+function drawShippingBox(f: Frame, p: number): void {
+  const boxTop = 14;
+  const boxW = 12;
+  let x: number;
+  if (p < 0.35) {
+    x = Math.round(-14 + (p / 0.35) * 40); // slide in: -14 -> 26
+  } else if (p < 0.7) {
+    x = 26; // parked under the tape gun
+  } else {
+    x = Math.round(26 + ((p - 0.7) / 0.3) * 40); // slide out: 26 -> 66
+  }
+  rect(f, x, boxTop, boxW, 8, 2);
+
+  if (p < 0.35) {
+    for (let i = 1; i <= 3; i++) {
+      px(f, x - i, boxTop - i, 2);
+      px(f, x + boxW - 1 + i, boxTop - i, 2);
+    }
+  } else if (p < 0.5) {
+    const len = Math.max(0, Math.round(3 * (1 - (p - 0.35) / 0.15)));
+    if (len === 0) {
+      hline(f, x, x + boxW - 1, boxTop, 2);
+    } else {
+      for (let i = 1; i <= len; i++) {
+        px(f, x - i, boxTop - i, 2);
+        px(f, x + boxW - 1 + i, boxTop - i, 2);
+      }
+    }
+  } else if (p < 0.7) {
+    const tapeX = x + Math.round(((p - 0.5) / 0.2) * (boxW - 1));
+    hline(f, x, tapeX, boxTop, 3);
+    fillRect(f, Math.max(x, tapeX - 1), boxTop - 2, 3, 2, 2);
+  } else {
+    hline(f, x, x + boxW - 1, boxTop, 3);
+  }
+}
+
+// tt-8l — domain: the taping line. One box per open PR in the merge queue
+// (clamped 1-3), staggered evenly around the cycle so they read as a
+// continuous line rather than lockstep duplicates.
+domainGlyphs["tt-8l"] = (t, counts) => {
+  const f = blank();
+  hline(f, 0, DMD_W - 1, 22, 1);
+  const boxes = Math.max(1, Math.min(3, counts.primary));
+  const cycle = 2600;
+  for (let j = 0; j < boxes; j++) {
+    const boxOffset = (j * cycle) / boxes;
+    const p = ((t + boxOffset) % cycle) / cycle;
+    drawShippingBox(f, p);
+  }
+  return f;
+};
+
+// tt-8l — celebrate override: blast-off, not the shared diamond rings. The
+// rocket climbs off the top of the board over a 3s window (naturally
+// clipped by px()'s bounds check) while jittered exhaust columns trail
+// beneath it; the pad stays lit throughout.
+function blastOffFrame(tMs: number): Frame {
+  const f = blank();
+  hline(f, 40, 60, 22, 1);
+  const progress = (tMs % 3000) / 3000;
+  const riseY = Math.round(progress * 22); // body top climbs y=8 -> y=-14
+  drawRocketAt(f, riseY, 2);
+  const bodyBottom = 8 - riseY + 14;
+  const rand = mulberry32(Math.floor(tMs / 90));
+  const cols = 2 + Math.round(progress); // widens 2 -> 3 as it climbs
+  for (let i = 0; i < cols; i++) {
+    const cx = 50 + i - Math.floor(cols / 2) + (Math.floor(rand() * 3) - 1);
+    const len = 2 + Math.floor(rand() * 3);
+    vline(f, cx, bodyBottom, Math.min(23, bodyBottom + len), 3);
+  }
+  return f;
+}
+
 // Per-droid STANDBY signature glyphs — a dim, slow, recognizable quiet
 // variant of each droid's active glyph. This is what an idle station renders
 // (instead of the shared anonymous breathing lattice above), so a fleet of
@@ -187,13 +320,12 @@ export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
     return f;
   },
 
-  // tt-8l — gate CLOSED (both bars centered on the threshold, no parting
-  // motion). The only motion is the threshold vline breathing 1..2 on 6s.
+  // tt-8l — the belt at rest: no boxes moving, just an empty flat-packed
+  // box outline breathing 1..2 on 5s.
   "tt-8l": (t) => {
     const f = blank();
-    fillRect(f, 22, 6, 6, 20, 1);
-    fillRect(f, 36, 6, 6, 20, 1);
-    vline(f, 32, 4, 27, breath(t, 6000));
+    hline(f, 0, DMD_W - 1, 22, 1);
+    rect(f, 26, 16, 12, 6, breath(t, 5000));
     return f;
   },
 
@@ -271,7 +403,7 @@ export function dmdFrame(
     case "stale":
       return staleFrame(tMs);
     case "celebrate":
-      return celebrateFrame(tMs);
+      return droid === "tt-8l" ? blastOffFrame(tMs) : celebrateFrame(tMs);
     case "active":
       return (activeGlyphs[droid] ?? idleFrame)(tMs);
     case "domain": {

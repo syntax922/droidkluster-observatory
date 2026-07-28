@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DMD_W, blank } from "./frame.js";
-import { dmdFrame, standbyGlyphs } from "./glyphs.js";
+import { type DmdState, type GlyphCounts, dmdFrame, standbyGlyphs } from "./glyphs.js";
 
 const DROIDS = ["hk-47", "2-1b", "tt-8l", "ev-9d9", "r5", "copilot"] as const;
 
@@ -105,12 +105,12 @@ describe("standby glyphs", () => {
       expect(dmdFrame("hk-47", "idle", t).includes(3)).toBe(false);
     }
   });
-  it("tt-8l standby gate is closed (bars meet at the threshold, no gap)", () => {
+  it("tt-8l standby is the shipping belt at rest (no gate bars)", () => {
     const f = dmdFrame("tt-8l", "idle", 0);
-    // Active glyph parts the bars around x=32; standby must show both bars
-    // filled right up to the threshold column with no daylight between them.
-    expect(f[16 * 64 + 27]).toBeGreaterThan(0);
-    expect(f[16 * 64 + 36]).toBeGreaterThan(0);
+    // Belt runs the full width at y=22; the old gate bars around x=27/x=36
+    // are gone.
+    expect(f[22 * 64 + 4]).toBeGreaterThan(0);
+    expect(f[22 * 64 + 59]).toBeGreaterThan(0);
   });
   it("all standby glyphs stay in bounds across a full cycle", () => {
     for (const d of DROIDS)
@@ -158,5 +158,54 @@ describe("domain", () => {
     const dom = dmdFrame("ev-9d9", "domain", 1234, { primary: 1, secondary: 0 });
     const cool = dmdFrame("ev-9d9", "cooling", 1234);
     expect(Array.from(dom)).toEqual(Array.from(cool));
+  });
+});
+
+describe("2-1b domain ECG", () => {
+  const dom = (n: number) => dmdFrame("2-1b", "domain", 400, { primary: n, secondary: 0 });
+  it("is deterministic and differs from active", () => {
+    expect(Array.from(dom(2))).toEqual(Array.from(dom(2)));
+    expect(Array.from(dom(2))).not.toEqual(Array.from(dmdFrame("2-1b", "active", 400)));
+  });
+  it("beat count scales with CI load", () => {
+    // count v>=2 pixel clusters crossing the baseline band differs between 1 and 3 PRs
+    expect(Array.from(dom(1))).not.toEqual(Array.from(dom(3)));
+  });
+  it("domain caps at intensity 3 only on <=2px tips, bulk <=2", () => {
+    const f = dom(3);
+    const bright = f.filter((v) => v === 3).length;
+    expect(bright).toBeLessThanOrEqual(12); // tips only (<=2px per beat * 6 beats cap)
+  });
+});
+
+describe("tt-8l shipping department", () => {
+  it("standby has no gate bars anymore and is calm", () => {
+    const f = dmdFrame("tt-8l", "idle", 0);
+    expect(Math.max(...Array.from(f))).toBeLessThanOrEqual(2);
+  });
+  it("domain box count scales with the merge queue", () => {
+    const one = dmdFrame("tt-8l", "domain", 700, { primary: 1, secondary: 0 });
+    const three = dmdFrame("tt-8l", "domain", 700, { primary: 3, secondary: 0 });
+    expect(Array.from(one)).not.toEqual(Array.from(three));
+  });
+  it("celebrate is the blast-off, not the diamond rings", () => {
+    const tt = dmdFrame("tt-8l", "celebrate", 900);
+    const other = dmdFrame("hk-47", "celebrate", 900);
+    expect(Array.from(tt)).not.toEqual(Array.from(other));
+  });
+  it("blast-off is deterministic", () => {
+    expect(Array.from(dmdFrame("tt-8l", "celebrate", 1234))).toEqual(
+      Array.from(dmdFrame("tt-8l", "celebrate", 1234)),
+    );
+  });
+  it("all tt-8l scene states stay above the flap band (rows 0-23)", () => {
+    for (const [state, counts] of [
+      ["idle", undefined],
+      ["domain", { primary: 2, secondary: 0 }],
+      ["active", undefined],
+    ] as const) {
+      const f = dmdFrame("tt-8l", state as DmdState, 500, counts as GlyphCounts | undefined);
+      for (let y = 25; y < 32; y++) for (let x = 0; x < 64; x++) expect(f[y * 64 + x] ?? 0).toBe(0);
+    }
   });
 });
