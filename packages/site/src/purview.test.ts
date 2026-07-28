@@ -5,17 +5,25 @@ import { derivePurview, emptyPurview } from "./purview.js";
 const T0 = Date.parse("2026-07-28T12:00:00Z");
 const iso = (minAgo: number) => new Date(T0 - minAgo * 60_000).toISOString();
 
-function chain(pr: number, hops: Array<[string, string, string]>, complete = false): Chain {
+function chain(
+  pr: number,
+  hops: Array<[string, string, string, string?]>,
+  complete = false,
+): Chain {
   return {
     pr,
     hops: hops.map(
-      ([at, droid, kind]) => ({ at, droid, kind, label: lbl(kind, pr) }) as Chain["hops"][number],
+      ([at, droid, kind, label]) =>
+        ({ at, droid, kind, label: label ?? lbl(kind, pr) }) as Chain["hops"][number],
     ),
     updated_at: hops[hops.length - 1]?.[0] ?? iso(0),
     active: true,
     complete,
   };
 }
+// chainL: same builder — named for callers that pass reducer-faithful per-hop
+// labels via the 4th tuple element (e.g. ciHop below) instead of relying on lbl().
+const chainL = chain;
 // Labels mirror the reducer's real formats — tt-8l's rule reads them.
 function lbl(kind: string, pr: number): string {
   if (kind === "review_posted") return `review APPROVED · PR #${pr}`;
@@ -151,6 +159,58 @@ describe("r5 dispatch pairs (feed)", () => {
     const p = derivePurview([], [ev("issue_dispatched", 71, 40)], T0);
     expect(p.r5.secondary).toBe(0);
     expect(p.r5.domainActive).toBe(false);
+  });
+});
+
+function ciHop(
+  at: string,
+  kind: "red" | "success" | "skipped",
+  pr: number,
+): [string, string, string, string] {
+  const word = kind === "red" ? "CI red" : kind === "success" ? "CI success" : "CI skipped";
+  return [at, "system", "check_run", `${word} (unit) · PR #${pr}`];
+}
+
+describe("2-1b amiss (unresolved CI red)", () => {
+  it("counts a red with no later success", () => {
+    const p = derivePurview([chainL(501, [ciHop(iso(5), "red", 501)])], [], T0);
+    expect(p["2-1b"].secondary).toBe(1);
+  });
+  it("a later success resolves it", () => {
+    const p = derivePurview(
+      [chainL(501, [ciHop(iso(6), "red", 501), ciHop(iso(3), "success", 501)])],
+      [],
+      T0,
+    );
+    expect(p["2-1b"].secondary).toBe(0);
+  });
+  it("a red followed only by skips stays unresolved", () => {
+    const p = derivePurview(
+      [chainL(501, [ciHop(iso(6), "red", 501), ciHop(iso(3), "skipped", 501)])],
+      [],
+      T0,
+    );
+    expect(p["2-1b"].secondary).toBe(1);
+  });
+  it("aged-out reds self-clear", () => {
+    const p = derivePurview([chainL(501, [ciHop(iso(14), "red", 501)])], [], T0);
+    expect(p["2-1b"].secondary).toBe(0); // outside CI_RECENT_MS (10 min)
+  });
+  it("multiple red chains count independently", () => {
+    const p = derivePurview(
+      [chainL(501, [ciHop(iso(4), "red", 501)]), chainL(502, [ciHop(iso(2), "red", 502)])],
+      [],
+      T0,
+    );
+    expect(p["2-1b"].secondary).toBe(2);
+  });
+  it("a success-then-red is unresolved (order matters)", () => {
+    const p = derivePurview(
+      [chainL(501, [ciHop(iso(6), "success", 501), ciHop(iso(3), "red", 501)])],
+      [],
+      T0,
+    );
+    expect(p["2-1b"].secondary).toBe(1);
   });
 });
 

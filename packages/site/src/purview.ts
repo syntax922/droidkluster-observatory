@@ -7,7 +7,8 @@ export interface DroidPurview {
   prs: number[]; // PR numbers in this droid's purview, newest-activity first
   domainActive: boolean;
   secondary: number; // per-droid meaning: hk-47 = reviews POSTED in window (outbox);
-  // r5 = in-flight dispatches (its prs is always []); others 0
+  // 2-1b = unresolved-red chain count (AFib trigger); r5 = in-flight dispatches
+  // (its prs is always []); others 0
 }
 export type Purview = Record<DroidId, DroidPurview>;
 
@@ -57,6 +58,7 @@ export function derivePurview(
   const hk47Entries: Array<[number, string]> = [];
   let hk47Secondary = 0;
   const twoOneBEntries: Array<[number, string]> = [];
+  let twoOneBSecondary = 0;
   const tt8lEntries: Array<[number, string]> = [];
 
   for (const c of chains) {
@@ -79,6 +81,21 @@ export function derivePurview(
         twoOneBEntries.push([c.pr, checkRun.hop.at]);
       }
     }
+
+    // 2-1b amiss (AFib trigger): does this chain have a CI red that's still
+    // unresolved? The red itself must be recent (CI_RECENT_MS — it shares the
+    // "in CI churn" recency semantics, so an old red is stale news and self-clears).
+    // The resolving CI success may be at ANY later time — a pass always resolves,
+    // regardless of how long ago the red fired.
+    const hasUnresolvedRed = c.hops.some((h, i) => {
+      if (h.kind !== "check_run" || !h.label.startsWith("CI red")) return false;
+      if (!within(h.at, nowMs, CI_RECENT_MS)) return false;
+      const laterSuccess = c.hops
+        .slice(i + 1)
+        .some((later) => later.kind === "check_run" && later.label.startsWith("CI success"));
+      return !laterSuccess;
+    });
+    if (hasUnresolvedRed) twoOneBSecondary++;
 
     // tt-8l: latest review_posted is an APPROVED verdict with no later merge (or
     // re-review — a new review_started means the approval no longer covers the
@@ -103,7 +120,11 @@ export function derivePurview(
   p["hk-47"] = { prs: hk47Prs, domainActive: hk47Prs.length > 0, secondary: hk47Secondary };
 
   const twoOneBPrs = toOrderedPrs(twoOneBEntries);
-  p["2-1b"] = { prs: twoOneBPrs, domainActive: twoOneBPrs.length > 0, secondary: 0 };
+  p["2-1b"] = {
+    prs: twoOneBPrs,
+    domainActive: twoOneBPrs.length > 0,
+    secondary: twoOneBSecondary,
+  };
 
   const tt8lPrs = toOrderedPrs(tt8lEntries);
   p["tt-8l"] = { prs: tt8lPrs, domainActive: tt8lPrs.length > 0, secondary: 0 };
