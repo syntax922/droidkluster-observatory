@@ -8,7 +8,7 @@ import { initIntro } from "./intro.js";
 import type { LaneState } from "./journey-controller.js";
 import { startJourneys } from "./journey-controller.js";
 import { buildLiveLanes, buildReplayLane } from "./journey-lanes.js";
-import { emptyPurview } from "./purview.js";
+import { derivePurview, emptyPurview } from "./purview.js";
 import { renderChains } from "./render/chains.js";
 import { renderDossier } from "./render/dossier.js";
 import { renderHonesty } from "./render/honesty.js";
@@ -61,6 +61,12 @@ let laneState: LaneState[] = [];
 // so the story rail can look up the excerpt for a specific hop.
 let liveExcerptsByPr = new Map<number, Map<string, string>>();
 
+// The raw day-feed events behind liveExcerptsByPr, kept around so renderLive
+// can derive live purview (derivePurview needs the actual events, not just
+// the excerpt lookup built from them). Rebuilt alongside liveExcerptsByPr on
+// every refreshExcerptsFromFeed resolution.
+let liveFeedEvents: PublicEvent[] = [];
+
 function liveExcerptsFor(pr: number): Map<string, string> {
   return liveExcerptsByPr.get(pr) ?? new Map();
 }
@@ -111,7 +117,7 @@ function renderLive(snap: CurrentSnapshot): void {
     droids: snap.droids,
     celebrating: celebration.observe(snap.chains),
     renderedAtMs: now,
-    purview: emptyPurview(),
+    purview: derivePurview(snap.chains, liveFeedEvents, now),
   };
 }
 
@@ -123,6 +129,7 @@ async function refreshExcerptsFromFeed(): Promise<void> {
       const body = (await res.json()) as { events?: PublicEvent[] };
       if (Array.isArray(body.events)) {
         liveExcerptsByPr = buildExcerptsByPr(body.events);
+        liveFeedEvents = body.events;
       }
     }
   } catch {
@@ -153,7 +160,7 @@ const replay = createReplayController({
       droids: snap.droids,
       celebrating: celebration.observe(snap.chains),
       renderedAtMs: replayNow,
-      purview: emptyPurview(),
+      purview: derivePurview(snap.chains, feed, replayNow),
     };
   },
   onIdle: (lastContact) => {
@@ -217,7 +224,14 @@ startPolling({
         droids: lastBoard.droids,
         celebrating: false,
         renderedAtMs: lastBoard.renderedAtMs,
-        purview: lastBoard.purview,
+        // Fresh emptyPurview(), NOT lastBoard.purview: BoardMode "stale"
+        // already renders the whole DMD frame as "stale" (deriveDmdState
+        // short-circuits on mode==="stale" before ever consulting purview),
+        // but the flap board reads view.purview[droid].prs directly in
+        // paintAll's setPrs call, keyed only off state==="stale" — a
+        // carried-forward purview would keep paging old PR numbers under a
+        // "no longer live" glyph. Same reasoning as the onIdle path below.
+        purview: emptyPurview(),
       };
       laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     } else {
@@ -237,7 +251,14 @@ startPolling({
         droids: lastBoard.droids,
         celebrating: false,
         renderedAtMs: lastBoard.renderedAtMs,
-        purview: lastBoard.purview,
+        // Fresh emptyPurview(), NOT lastBoard.purview: BoardMode "stale"
+        // already renders the whole DMD frame as "stale" (deriveDmdState
+        // short-circuits on mode==="stale" before ever consulting purview),
+        // but the flap board reads view.purview[droid].prs directly in
+        // paintAll's setPrs call, keyed only off state==="stale" — a
+        // carried-forward purview would keep paging old PR numbers under a
+        // "no longer live" glyph. Same reasoning as the onIdle path below.
+        purview: emptyPurview(),
       };
       laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     }

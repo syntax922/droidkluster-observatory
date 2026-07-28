@@ -4,6 +4,11 @@ import { DROID_REGISTRY } from "../registry.js";
 export function renderStations(el: HTMLElement, droids: DroidStatus[], nowMs: number): void {
   el.replaceChildren();
   for (const d of droids) {
+    // UI-only removal: copilot is being retired from the fleet. The public
+    // schema/reducer (DroidIdSchema, core's droid state) still model it —
+    // only the station card is dropped here. Follow-up: drop copilot from
+    // DroidId/reducer/dossier once the fleet fully retires it.
+    if (d.droid === "copilot") continue;
     const info = DROID_REGISTRY[d.droid];
     const card = document.createElement("button");
     card.className = `station station--${d.state}`;
