@@ -119,16 +119,22 @@ export function createFlapBoard(): FlapBoard {
       }
       lastPageIndex = pageIndex;
 
+      // Cascade: cell i's flip window opens at changedAt + i*STAGGER_MS and
+      // runs FLIP_MS — left cells start (and settle) first, right cells wait
+      // their turn, matching a real Solari board's left-to-right sweep.
       for (let i = 0; i < CELLS; i++) {
         const x = LEFT_MARGIN + i * CELL_PITCH;
         const target = cellTarget[i] ?? " ";
+        const prev = cellPrev[i] ?? " ";
         const changedAt = cellChangedAt[i] ?? Number.NEGATIVE_INFINITY;
-        const local = tMs - changedAt + i * STAGGER_MS;
-        if (!reducedMotion && local >= 0 && local < FLIP_MS) {
-          drawFlipCell(f, cellPrev[i] ?? " ", target, x, local / FLIP_MS);
+        const start = changedAt + i * STAGGER_MS;
+        const end = start + FLIP_MS;
+        if (!reducedMotion && tMs >= start && tMs < end) {
+          drawFlipCell(f, prev, target, x, (tMs - start) / FLIP_MS);
         } else {
-          const v = i === 0 && target === "#" ? 3 : 2;
-          drawChar(f, target, x, BOARD_ROW_Y, v);
+          const shown = !reducedMotion && tMs < start ? prev : target;
+          const v = i === 0 && shown === "#" ? 3 : 2;
+          drawChar(f, shown, x, BOARD_ROW_Y, v);
         }
       }
     },
