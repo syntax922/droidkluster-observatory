@@ -86,16 +86,21 @@ export function derivePurview(
     // unresolved? The red itself must be recent (CI_RECENT_MS — it shares the
     // "in CI churn" recency semantics, so an old red is stale news and self-clears).
     // The resolving CI success may be at ANY later time — a pass always resolves,
-    // regardless of how long ago the red fired.
-    const hasUnresolvedRed = c.hops.some((h, i) => {
-      if (h.kind !== "check_run" || !h.label.startsWith("CI red")) return false;
-      if (!within(h.at, nowMs, CI_RECENT_MS)) return false;
-      const laterSuccess = c.hops
-        .slice(i + 1)
-        .some((later) => later.kind === "check_run" && later.label.startsWith("CI success"));
-      return !laterSuccess;
-    });
-    if (hasUnresolvedRed) twoOneBSecondary++;
+    // regardless of how long ago the red fired. Complete chains excluded (same
+    // gate as the prs rule above): merged/closed means the episode is over — a
+    // red on a chain that's already settled doesn't fibrillate; sustained AFib
+    // would overclaim.
+    if (!c.complete) {
+      const hasUnresolvedRed = c.hops.some((h, i) => {
+        if (h.kind !== "check_run" || !h.label.startsWith("CI red")) return false;
+        if (!within(h.at, nowMs, CI_RECENT_MS)) return false;
+        const laterSuccess = c.hops
+          .slice(i + 1)
+          .some((later) => later.kind === "check_run" && later.label.startsWith("CI success"));
+        return !laterSuccess;
+      });
+      if (hasUnresolvedRed) twoOneBSecondary++;
+    }
 
     // tt-8l: latest review_posted is an APPROVED verdict with no later merge (or
     // re-review — a new review_started means the approval no longer covers the

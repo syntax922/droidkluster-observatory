@@ -168,7 +168,11 @@ function ciHop(
   pr: number,
 ): [string, string, string, string] {
   const word = kind === "red" ? "CI red" : kind === "success" ? "CI success" : "CI skipped";
-  return [at, "system", "check_run", `${word} (unit) · PR #${pr}`];
+  // Mirror reduce.ts's real attribution: red check_runs come from 2-1b; other
+  // check_run outcomes stay "system". The derivation doesn't read droid, but
+  // fixtures should still be reducer-faithful, same discipline as the labels.
+  const droid = kind === "red" ? "2-1b" : "system";
+  return [at, droid, "check_run", `${word} (unit) · PR #${pr}`];
 }
 
 describe("2-1b amiss (unresolved CI red)", () => {
@@ -211,6 +215,10 @@ describe("2-1b amiss (unresolved CI red)", () => {
       T0,
     );
     expect(p["2-1b"].secondary).toBe(1);
+  });
+  it("a complete (merged/closed) chain doesn't fibrillate, even with an in-window red", () => {
+    const p = derivePurview([chainL(501, [ciHop(iso(5), "red", 501)], true)], [], T0);
+    expect(p["2-1b"].secondary).toBe(0);
   });
 });
 
