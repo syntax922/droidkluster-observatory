@@ -327,7 +327,7 @@ describe("reduce", () => {
       {
         kind: "event",
         id: "e2",
-        subject: "gh.event.otherrepo.pr.opened.7",
+        subject: "gh.event.project.pr.opened.7",
         ts: "2026-07-27T00:00:00Z",
         payload: { pull_request: { number: 7 } },
       },

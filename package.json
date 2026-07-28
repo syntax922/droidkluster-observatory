@@ -11,6 +11,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "build": "npm run build --workspaces --if-present",
+    "check:redaction": "node scripts/check-redaction.mjs",
     "check": "npm run lint && npm run typecheck && npm run test",
     "test:e2e": "npm run build --workspace @observatory/core --workspace @observatory/site && npx playwright test --config packages/site/playwright.config.ts"
   },

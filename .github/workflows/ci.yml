@@ -12,6 +12,11 @@ jobs:
         with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm run check
+      # Mechanism-only: this public workflow greps source for the *shape* of
+      # a gh.event.* subject (neutral tokens vs. any other literal), never
+      # for private repo/org names — the real term list can only live in
+      # the private GitOps repo's own scheduled check.
+      - run: npm run check:redaction
       - run: npm run build
   e2e:
     runs-on: ubuntu-latest
