@@ -1,6 +1,6 @@
 import type { Chain, PublicEventKind } from "@observatory/core";
 import { describe, expect, it } from "vitest";
-import { STAGES, type Stage, chainStage, createTween, stageOf } from "./journey.js";
+import { chainStage, createTween, STAGES, type Stage, stageOf } from "./journey.js";
 
 describe("stageOf", () => {
   // Complete mapping table over every PublicEventKind — this test breaks

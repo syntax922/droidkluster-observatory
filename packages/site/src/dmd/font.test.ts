@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FONT_H, FONT_W, drawChar, glyphRows } from "./font.js";
+import { drawChar, FONT_H, FONT_W, glyphRows } from "./font.js";
 import { blank } from "./frame.js";
 
 describe("font", () => {

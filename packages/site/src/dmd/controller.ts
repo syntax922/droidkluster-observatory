@@ -1,6 +1,6 @@
 import type { DroidId, DroidStatus } from "@observatory/core";
 import type { DroidPurview, Purview } from "../purview.js";
-import { type FlapBoard, createFlapBoard } from "./flapboard.js";
+import { createFlapBoard, type FlapBoard } from "./flapboard.js";
 import { type DmdState, dmdFrame } from "./glyphs.js";
 import { paintFrame } from "./painter.js";
 import { ACCENTS } from "./palette.js";

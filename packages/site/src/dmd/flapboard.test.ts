@@ -1,14 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  BOARD_ROW_Y,
-  CELL_PITCH,
-  FLIP_MS,
-  PAGE_MS,
-  STAGGER_MS,
-  createFlapBoard,
-} from "./flapboard.js";
+import { CELL_PITCH, createFlapBoard, FLIP_MS, PAGE_MS, STAGGER_MS } from "./flapboard.js";
 import { FONT_W } from "./font.js";
-import { DMD_W, blank } from "./frame.js";
+import { blank, DMD_W } from "./frame.js";
 
 function litRows(f: Uint8Array): Set<number> {
   const rows = new Set<number>();

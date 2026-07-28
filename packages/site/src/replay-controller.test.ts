@@ -1,5 +1,6 @@
 import type { CurrentSnapshot, PublicEvent, ReplayBundle, ReplayIndex } from "@observatory/core";
 import { describe, expect, it, vi } from "vitest";
+import type { ReplayControllerPlayer } from "./replay-controller.js";
 import { createReplayController } from "./replay-controller.js";
 
 function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
@@ -29,8 +30,8 @@ function bundle(id: string): ReplayBundle {
   };
 }
 
-function fakePlayer(): { start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> } {
-  return { start: vi.fn(), stop: vi.fn() };
+function fakePlayer(): ReplayControllerPlayer {
+  return { start: vi.fn<() => void>(), stop: vi.fn<() => void>() };
 }
 
 describe("createReplayController", () => {

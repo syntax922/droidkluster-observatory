@@ -1,8 +1,8 @@
 import {
   type CurrentSnapshot,
+  emptyFleetState,
   type PublicEvent,
   type ReplayBundle,
-  emptyFleetState,
   reduce,
   toSnapshot,
 } from "@observatory/core";

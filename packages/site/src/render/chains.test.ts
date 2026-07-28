@@ -255,7 +255,7 @@ describe("renderChains — consecutive-CI batching", () => {
     const el = document.createElement("div");
     renderChains(el, [c]);
     const row = el.querySelector(".tl-row");
-    expect((row?.querySelector(".tl-node") as HTMLElement).style.backgroundColor).toBe(
+    expect((row?.querySelector(".tl-node") as HTMLElement | null)?.style.backgroundColor).toBe(
       "rgb(107, 119, 137)",
     );
     expect(row?.querySelector(".tl-time")?.textContent).toBe("+0s");

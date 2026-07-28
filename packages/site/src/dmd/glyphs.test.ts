@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { DMD_W, type Frame, blank } from "./frame.js";
+import { blank, DMD_W, type Frame } from "./frame.js";
 import {
-  type DmdState,
-  type GlyphCounts,
   blastOffFrame,
   celebrateFrame,
+  type DmdState,
   dmdFrame,
   drawHeartRing,
+  type GlyphCounts,
   standbyGlyphs,
 } from "./glyphs.js";
 

@@ -1,5 +1,5 @@
 import type { DroidId } from "@observatory/core";
-import { DMD_H, DMD_W, type Frame, blank, fillRect, hline, px, rect, vline } from "./frame.js";
+import { blank, DMD_H, DMD_W, type Frame, fillRect, hline, px, rect, vline } from "./frame.js";
 
 export type DmdState = "idle" | "active" | "stale" | "celebrate" | "cooling" | "domain";
 

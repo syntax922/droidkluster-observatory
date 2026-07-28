@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DMD_H, DMD_W, blank, fillRect, hline, px, rect } from "./frame.js";
+import { blank, DMD_W, fillRect, hline, px, rect } from "./frame.js";
 
 describe("frame primitives", () => {
   it("px is bounds-safe and keeps the max intensity", () => {

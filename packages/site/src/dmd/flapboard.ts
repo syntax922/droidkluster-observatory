@@ -1,4 +1,4 @@
-import { FONT_H, FONT_W, drawChar, glyphRows } from "./font.js";
+import { drawChar, FONT_H, FONT_W, glyphRows } from "./font.js";
 import { type Frame, hline, px } from "./frame.js";
 
 export const BOARD_ROW_Y = 26; // glyph top row (occupies 26..30 of the 25..31 band)

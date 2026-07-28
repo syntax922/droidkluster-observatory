@@ -14,8 +14,8 @@ import { renderDossier } from "./render/dossier.js";
 import { renderHonesty } from "./render/honesty.js";
 import { renderJourneys } from "./render/journeys.js";
 import { renderStations } from "./render/stations.js";
-import { createReplayController } from "./replay-controller.js";
 import { ReplayPlayer } from "./replay.js";
+import { createReplayController } from "./replay-controller.js";
 import { decideMode } from "./shell.js";
 import "./style.css";
 

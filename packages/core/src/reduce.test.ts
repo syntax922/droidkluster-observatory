@@ -292,7 +292,7 @@ describe("reduce", () => {
   });
 
   it("unexpected review state falls back to COMMENTED", () => {
-    const { state, emitted } = reduce(
+    const { emitted } = reduce(
       emptyFleetState(),
       env("gh.event.exampleproj.pull_request_review.submitted.1700", {
         action: "submitted",

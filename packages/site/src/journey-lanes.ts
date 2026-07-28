@@ -1,6 +1,6 @@
 import type { Chain, DroidId, PublicEvent } from "@observatory/core";
+import { chainStage, STAGES, type Stage, stageOf } from "./journey.js";
 import type { LaneState } from "./journey-controller.js";
-import { STAGES, type Stage, chainStage, stageOf } from "./journey.js";
 import type { JourneyLane } from "./render/journeys.js";
 
 // Caps how many chains get their own lane on the live journey map — more
