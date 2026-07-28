@@ -28,32 +28,71 @@ ever pushes outbound and never accepts inbound connections.
 
 ## 2. Cloudflare: Pages site
 
-1. Cloudflare dashboard → **Workers & Pages** → **Create application** →
-   **Pages** → **Connect to Git** → select the `droidkluster-observatory`
-   repository.
-2. Build settings:
-   - Framework preset: **None**.
-   - Root directory: `/` (repo root — this is an npm workspaces monorepo;
-     Pages needs the root `package.json` and lockfile to resolve
-     `@observatory/core` for the site build).
-   - Build command: `npm run build --workspace @observatory/core --workspace @observatory/site`
+The Pages project (`observatory`) is **not** git-connected (Git Provider:
+No) — there is no "Connect to Git" step and no auto-redeploy on push.
+Every deploy is a direct upload via the `wrangler` CLI, run manually (or
+from a future CI job) against a wrangler OAuth session on the deploying
+machine.
 
-     The site imports `@observatory/core` as a workspace package resolved
-     through its built `dist/` output (the package's `main` field points
-     there, not at TypeScript source). Building `@observatory/site` alone
-     fails with an unresolved-entry error from Vite — verified locally by
-     building the site workspace in isolation without a prior core build.
-     `@observatory/core` must be built first, in the same command; this
-     mirrors the pattern the root CI already uses for the Playwright job
-     (`test:e2e`'s `npm run build --workspace @observatory/core --workspace @observatory/site`).
-   - Build output directory: `packages/site/dist`.
-3. Environment variables: `VITE_DATA_BASE=https://data.whatis.droidkluster.com`
-   (the R2 public domain from step 1 above — this is a build-time Vite env
-   var, baked into the static bundle, not a runtime secret).
-4. Deploy. Pages will auto-redeploy on every push to `main` — repo write
-   access is effectively site-deploy access; see
-   [Threat model](../THREAT_MODEL.md#what-an-attacker-gains-at-each-compromise-point)
-   for the blast radius that implies (defacement, not cluster compromise).
+1. One-time setup: Cloudflare dashboard → **Workers & Pages** → **Create
+   application** → **Pages** → **Upload assets** → name the project
+   `observatory`. (Direct-upload projects can also be created by the
+   first `wrangler pages deploy` invocation below — it will offer to
+   create the project if `observatory` doesn't exist yet.)
+2. Build:
+
+   ```bash
+   npm run build --workspace @observatory/core --workspace @observatory/site
+   ```
+
+   The site imports `@observatory/core` as a workspace package resolved
+   through its built `dist/` output (the package's `main` field points
+   there, not at TypeScript source). Building `@observatory/site` alone
+   fails with an unresolved-entry error from Vite — verified locally by
+   building the site workspace in isolation without a prior core build.
+   `@observatory/core` must be built first, in the same command; this
+   mirrors the pattern the root CI already uses for the Playwright job
+   (`test:e2e`'s `npm run build --workspace @observatory/core --workspace @observatory/site`).
+   Build output directory: `packages/site/dist`.
+
+   Build-time env var: `VITE_DATA_BASE=https://data.whatis.droidkluster.com`
+   (the R2 public domain from step 1 above), baked into the static bundle
+   at build time, not a runtime secret.
+3. Deploy:
+
+   ```bash
+   npx wrangler pages deploy packages/site/dist --project-name observatory --branch main
+   ```
+
+   This requires an authenticated `wrangler` session (`npx wrangler
+   login`) on the machine running the command — there's no git push that
+   triggers this on Cloudflare's side. Optionally pass
+   `--commit-hash $(git rev-parse HEAD) --commit-dirty=false` so the
+   Cloudflare dashboard records which commit produced the deployed
+   bundle, for provenance when a direct-upload deploy isn't
+   auto-attributed to a commit the way a git-connected one would be.
+4. **Verify the deploy actually served before trusting it.** Direct-upload
+   Pages deploys have hit edge-propagation issues where the site root
+   (`/`) keeps serving a stale cached HTML shell — or worse, the
+   SPA-fallback route serves stale JS under the new bundle's expected
+   path — so `curl /` returning 200 is not proof the new build is live.
+   The reliable check:
+   1. Fetch the site root and extract the exact `assets/index-*.js`
+      filename referenced in the HTML (Vite content-hashes this
+      filename per build, so a stale cache serves the *old* hash).
+   2. Poll that exact asset URL directly until it returns `200` with a
+      JavaScript content-type. Only then is the new bundle confirmed
+      live at the edge — checking the root document alone can pass while
+      the asset it references is still 404ing or serving the previous
+      deploy's content.
+
+   Every deploy also bumps a stamp —
+   `document.documentElement.dataset.build` in
+   [`packages/site/src/main.ts`](../packages/site/src/main.ts) — to a new
+   value (e.g. the deploy date). This forces the new bundle to re-hash
+   past any stale edge cache of the previous one, and is inspectable in
+   devtools (`document.documentElement.dataset.build`) as a quick sanity
+   check on which build is actually rendering in a given browser tab.
 
 ## 3. DNS: `whatis.droidkluster.com`
 
