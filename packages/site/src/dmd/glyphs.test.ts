@@ -328,6 +328,81 @@ describe("2-1b heart-ring continuity (fix round 1)", () => {
   });
 });
 
+// Fix round 2 (ECG trace continuity): the trace previously plotted one px
+// per x-column, so steep QRS strokes (8-10 rows in 1-2 columns) fragmented
+// into isolated dots — the same class of bug the heart ring had. drawPqrst
+// and drawAfibComplex now bridge consecutive samples with plotLine (see
+// tracePointPlotter). This pins it the same way the heart-ring fix round 1
+// test does: every lit pixel in the scene band (rows 0-23) must have a
+// Chebyshev-1 neighbor. Swept across a full 5120ms sweep (scroll period) at
+// 80ms steps so the check also exercises the wrapX-seam guard (a complex's
+// xOrigin drifts through every possible position relative to the board
+// edge over one sweep) — the bridging must never leave a point isolated
+// even when its bridge into/out of the seam is skipped.
+describe("2-1b ECG trace continuity (fix round 2)", () => {
+  function assertNoIsolatedDots(f: Frame): void {
+    const points: Array<[number, number]> = [];
+    for (let y = 0; y < 24; y++)
+      for (let x = 0; x < DMD_W; x++) if ((f[y * DMD_W + x] ?? 0) > 0) points.push([x, y]);
+    expect(points.length).toBeGreaterThan(0);
+    for (const [x, y] of points) {
+      const hasNeighbor = points.some(
+        ([x2, y2]) => (x2 !== x || y2 !== y) && Math.max(Math.abs(x2 - x), Math.abs(y2 - y)) <= 1,
+      );
+      expect(hasNeighbor).toBe(true);
+    }
+  }
+
+  it("sinus (domain, beats=3) trace is a connected chain across a full sweep", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      assertNoIsolatedDots(dmdFrame("2-1b", "domain", t, { primary: 3, secondary: 0 }));
+    }
+  });
+
+  it("AFib (domain, amiss) trace is a connected chain across a full sweep", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      assertNoIsolatedDots(dmdFrame("2-1b", "domain", t, { primary: 3, secondary: 1 }));
+    }
+  });
+
+  it("standby (resting sinus) trace is also a connected chain", () => {
+    for (let t = 0; t < 5000; t += 250) {
+      assertNoIsolatedDots(dmdFrame("2-1b", "idle", t));
+    }
+  });
+
+  it("active (always-AFib) trace is also a connected chain", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      assertNoIsolatedDots(dmdFrame("2-1b", "active", t, { primary: 3, secondary: 0 }));
+    }
+  });
+
+  it("QRS strokes read as connected strokes, not scattered dots — spot-check a single sinus complex", () => {
+    // A single beat (primary=1) at a fixed t so the complex lands at a known
+    // position; assert the R-tip column has a Chebyshev-adjacent lit pixel
+    // immediately below it (the bridged upstroke), not a gap.
+    const f = dmdFrame("2-1b", "domain", 0, { primary: 1, secondary: 0 }) as Frame;
+    let tipX = -1;
+    let tipY = 99;
+    for (let x = 0; x < DMD_W; x++) {
+      for (let y = 0; y < 24; y++) {
+        if ((f[y * DMD_W + x] ?? 0) > 0 && y < tipY) {
+          tipY = y;
+          tipX = x;
+        }
+      }
+    }
+    expect(tipX).toBeGreaterThanOrEqual(0);
+    // Something lit within 1px below/beside the topmost (R-tip) pixel —
+    // the bridged upstroke, not an isolated apex dot.
+    let neighborBelow = false;
+    for (let dx = -1; dx <= 1; dx++)
+      for (let dy = 1; dy <= 1; dy++)
+        if ((f[(tipY + dy) * DMD_W + (tipX + dx)] ?? 0) > 0) neighborBelow = true;
+    expect(neighborBelow).toBe(true);
+  });
+});
+
 describe("tt-8l shipping department", () => {
   it("standby has no gate bars anymore and is calm", () => {
     const f = dmdFrame("tt-8l", "idle", 0);
@@ -349,6 +424,75 @@ describe("tt-8l shipping department", () => {
       const bright = f.filter((v) => v === 3).length;
       expect(bright).toBeLessThanOrEqual(6); // 2px accent * 3 boxes max
     }
+  });
+
+  // Box packing upgrade: paper drops into the open box, then the flaps FOLD
+  // shut (hinged, angular keyframes) instead of shrinking to a line. Single
+  // box (primary=1) so phase maps directly to t (2600ms cycle, no stagger
+  // offset): parked at x=26 for p in [0.3, 0.75) — slide-in [0,0.3), paper
+  // drop [0.3,0.45), fold [0.45,0.6), tape [0.6,0.75), slide-out [0.75,1).
+  describe("box packing: paper drop + flap fold", () => {
+    const boxX = 26;
+    const boxTop = 14;
+    const paperCols = [boxX + 4, boxX + 5, boxX + 6];
+    const paperRows = [boxTop - 5, boxTop - 2, boxTop + 1, boxTop + 4]; // ys[] in drawPackingSlip
+
+    function paperLit(f: Frame): boolean {
+      return paperRows.some((y) => paperCols.some((x) => (f[y * DMD_W + x] ?? 0) === 2));
+    }
+
+    it("paper is visible during the open (drop) phase — both above and inside the box", () => {
+      const rowAbove = paperRows[0] as number;
+      const rowInside = paperRows[2] as number;
+      const col = paperCols[1] as number;
+      // t=800: dropP~0.128 -> stepIdx 0 (above the box, y=boxTop-5).
+      const above = dmdFrame("tt-8l", "domain", 800, { primary: 1, secondary: 0 }) as Frame;
+      expect(above[rowAbove * DMD_W + col]).toBe(2);
+      // t=1000: dropP~0.564 -> stepIdx 2 (settled inside, y=boxTop+1).
+      const inside = dmdFrame("tt-8l", "domain", 1000, { primary: 1, secondary: 0 }) as Frame;
+      expect(inside[rowInside * DMD_W + col]).toBe(2);
+    });
+
+    it("paper is absent once the flaps have closed (fold phase onward)", () => {
+      for (const t of [1200, 1400, 1600, 2000, 2500]) {
+        const f = dmdFrame("tt-8l", "domain", t, { primary: 1, secondary: 0 }) as Frame;
+        expect(paperLit(f)).toBe(false);
+      }
+    });
+
+    it("flap fold shows >=3 distinct flap configurations across the fold window", () => {
+      // Fold window is t in [1170, 1560). Sample densely and compare the
+      // full frame (flap pixels are the only thing changing at fixed x=26).
+      const samples: string[] = [];
+      for (let t = 1175; t < 1560; t += 40) {
+        samples.push(
+          Array.from(dmdFrame("tt-8l", "domain", t, { primary: 1, secondary: 0 })).join(","),
+        );
+      }
+      const distinct = new Set(samples);
+      expect(distinct.size).toBeGreaterThanOrEqual(3);
+    });
+
+    it("fold keyframes are mirrored: at the outward-up and inward keyframes, the left/right flap tips are horizontally symmetric around the box center", () => {
+      const boxW = 12;
+      const centerX = boxX + (boxW - 1) / 2; // 31.5
+      // outward-up keyframe: t=1180 (foldP~0.077 -> kf=0).
+      const outward = dmdFrame("tt-8l", "domain", 1180, { primary: 1, secondary: 0 }) as Frame;
+      // Left tip at (boxX-3, boxTop-3); right tip at (boxX+boxW+2, boxTop-3) — equidistant from centerX.
+      expect(outward[(boxTop - 3) * DMD_W + (boxX - 3)]).toBeGreaterThan(0);
+      expect(outward[(boxTop - 3) * DMD_W + (boxX + boxW + 2)]).toBeGreaterThan(0);
+      expect(boxX - 3 - centerX).toBeCloseTo(-(boxX + boxW + 2 - centerX), 5);
+    });
+
+    it("all box-packing phases stay above the flap band (rows 0-23) and within the shipped intensity caps", () => {
+      for (let t = 0; t < 2600; t += 50) {
+        const f = dmdFrame("tt-8l", "domain", t, { primary: 1, secondary: 0 }) as Frame;
+        for (let y = 24; y < 32; y++)
+          for (let x = 0; x < DMD_W; x++) expect(f[y * DMD_W + x] ?? 0).toBe(0);
+        const bright = f.filter((v) => v === 3).length;
+        expect(bright).toBeLessThanOrEqual(2); // single box: <=2px v=3 tape-gun accent
+      }
+    });
   });
   it("celebrate is the blast-off, not the diamond rings", () => {
     const tt = dmdFrame("tt-8l", "celebrate", 900);

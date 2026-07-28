@@ -209,6 +209,71 @@ activeGlyphs["hk-47"] = (t, counts) => {
 // accent domain/active budget in the module-level comment block refers to.
 // The PR and ST segments are intentionally flat (no px calls): the
 // baseline hline every caller draws already covers them.
+// Shared point-plotter for both PQRST families (drawPqrst, drawAfibComplex):
+// draws each sample point via px(), and — when `bridge` is set — connects it
+// to the PREVIOUS point with plotLine at `bridgeV` first, so a steep run
+// (e.g. the QRS's Q-R-S strokes, which cross 5-8 rows in a single x-step)
+// renders as a continuous stroke instead of an isolated per-column dot
+// (fix round 2: the trace previously plotted one px per column, leaving the
+// QRS limbs as scattered dots exactly like the heart ring's round-1 bug).
+// Callers still write the point's own intensity via px() AFTER the bridge,
+// so an R-tip's tipV always wins over the bridge's bulk v (px is max-blend:
+// see frame.ts) — the tip stays exactly the apex pixel(s), never diluted to
+// bulk.
+//
+// The bridge is monotonic-x only: it's skipped whenever the previous and
+// current point's UNWRAPPED raw x fall in different wrapX periods (a
+// complex scrolling near the board edge can have its early columns land
+// past x=63 into the next period while its later columns are still in the
+// current one — see wrapX). Bridging across that seam would draw backward
+// across nearly the whole board instead of the short local segment
+// intended. The point itself is always still drawn via px() in that case —
+// only the interpolated stroke between it and its predecessor is skipped.
+//
+// Most points in a complex have two edges (bridged both to their
+// predecessor and, via the next call, to their successor), so losing one to
+// a seam-skip still leaves the other. But a few points are chain DEAD ENDS
+// — bridged from their predecessor only, with no forward bridge (P1 and the
+// final S sample: the PR/ST gaps are deliberately left unbridged so those
+// segments stay flat) — and aren't within Chebyshev-1 of the baseline hline
+// either (P1 sits 2px above it, the final S sample 2px below). For those,
+// pass `anchorIfUnbridged: true`: if their sole edge gets cut by the seam
+// guard, a short same-column connector down/up to the baseline is drawn
+// instead, so the point is never left with zero neighbors. This connector
+// only ever appears in the rare frame where that exact point straddles the
+// sweep seam — it changes nothing in the far more common unwrapped case.
+function tracePointPlotter(
+  f: Frame,
+  xOrigin: number,
+  baselineY: number,
+  bridgeV: number,
+): (
+  dx: number,
+  dy: number,
+  intensity: number,
+  bridge?: boolean,
+  anchorIfUnbridged?: boolean,
+) => void {
+  let prevRawX: number | null = null;
+  let prevY = 0;
+  return (dx, dy, intensity, bridge = false, anchorIfUnbridged = false) => {
+    const rawX = xOrigin + dx;
+    const y = baselineY + dy;
+    const wrappedX = wrapX(rawX);
+    let bridged = false;
+    if (bridge && prevRawX !== null && Math.floor(prevRawX / DMD_W) === Math.floor(rawX / DMD_W)) {
+      plotLine(f, wrapX(prevRawX), prevY, wrappedX, y, bridgeV);
+      bridged = true;
+    }
+    if (bridge && !bridged && anchorIfUnbridged) {
+      plotLine(f, wrappedX, y, wrappedX, baselineY, bridgeV);
+    }
+    px(f, wrappedX, y, intensity);
+    prevRawX = rawX;
+    prevY = y;
+  };
+}
+
 function drawPqrst(
   f: Frame,
   xOrigin: number,
@@ -216,29 +281,34 @@ function drawPqrst(
   opts: { v: number; tipV: number },
 ): void {
   const { v, tipV } = opts;
-  const put = (dx: number, dy: number, intensity: number) =>
-    px(f, wrapX(xOrigin + dx), baselineY + dy, intensity);
+  const put = tracePointPlotter(f, xOrigin, baselineY, v);
   // P wave: a small ascending bump. dx=1's peak at baseline-2 is also the
   // sinus/AFib discriminator used by the test suite — AFib's fibrillatory
-  // jitter is contractually only ±1px, so it can never land here.
+  // jitter is contractually only ±1px, so it can never land here. (The
+  // Q->R-upstroke bridge below also touches baseline-2, but 1 column before
+  // the R-tip — outside the discriminator's -6..-3 window; see the
+  // "2-1b PQRST" describe block's recalibration-proof test.)
   put(0, -1, v);
-  put(1, -2, v);
-  // dx 2-3: flat PR segment (baseline hline covers it).
+  put(1, -2, v, true, true); // P1: chain dead end (PR gap unbridged forward) — anchor if seam-skipped.
+  // dx 2-3: flat PR segment (baseline hline covers it) — intentionally NOT
+  // bridged from the P wave into Q, so the isoelectric segment stays flat.
   put(4, 1, v); // Q dip
-  // R spike: upstroke/downstroke at bulk v; the apex (dx 6-7, 2px wide) is
-  // the tip accent, ~9px above baseline (within the 8-10px contract range).
-  put(5, -4, v);
-  put(6, -9, tipV);
-  put(7, -9, tipV);
-  put(8, -4, v);
-  put(9, 3, v); // S dip (upstroke to baseline)
-  put(10, 2, v); // S dip (continuing back toward baseline)
-  // dx 11: flat ST segment (baseline hline covers it).
-  // T wave: a rounded 4px bump.
-  put(12, -1, v);
-  put(13, -2, v);
-  put(14, -2, v);
-  put(15, -1, v);
+  // R spike: upstroke/downstroke at bulk v, bridged; the apex (dx 6-7, 2px
+  // wide) is the tip accent, ~9px above baseline (within the 8-10px
+  // contract range) — bridged in but written at tipV so it wins the
+  // max-blend over the bridge's own bulk-v pass through that same pixel.
+  put(5, -4, v, true);
+  put(6, -9, tipV, true);
+  put(7, -9, tipV, true);
+  put(8, -4, v, true);
+  put(9, 3, v, true); // S dip (upstroke to baseline)
+  put(10, 2, v, true, true); // S dip (toward baseline): chain dead end (ST gap unbridged forward).
+  // dx 11: flat ST segment (baseline hline covers it) — intentionally NOT
+  // bridged from S into T, matching the PR segment's flat treatment.
+  put(12, -1, v); // T wave: a rounded 4px bump.
+  put(13, -2, v, true);
+  put(14, -2, v, true);
+  put(15, -1, v, true);
 }
 
 // AFib fibrillatory baseline: sparse ±1px jitter wavelets between
@@ -269,14 +339,16 @@ function drawAfibComplex(
   ampAdjust: number,
 ): void {
   const h = clamp(9 + ampAdjust, 6, 12);
-  const put = (dx: number, dy: number, intensity: number) =>
-    px(f, wrapX(x + dx), baselineY + dy, intensity);
+  // Same bridging shape as drawPqrst's QRS (see tracePointPlotter) — no P
+  // wave here (that's the point: AFib has none), so the whole complex is
+  // one continuous Q-R-S stroke with no flat gaps to skip.
+  const put = tracePointPlotter(f, x, baselineY, v);
   put(-2, 1, v); // Q
-  put(-1, -4, v); // R upstroke
-  put(0, -h, tipV); // R tip
-  put(1, -h, tipV); // R tip (2nd px)
-  put(2, -4, v); // R downstroke
-  put(3, 2, v); // S
+  put(-1, -4, v, true); // R upstroke
+  put(0, -h, tipV, true); // R tip
+  put(1, -h, tipV, true); // R tip (2nd px)
+  put(2, -4, v, true); // R downstroke
+  put(3, 2, v, true, true); // S: chain dead end (no forward point) — anchor if seam-skipped.
 }
 
 // Shared AFib renderer, parameterized by the caller's intensity budget.
@@ -480,43 +552,83 @@ domainGlyphs["2-1b"] = (t, counts) => {
   return f;
 };
 
+// A packing slip (~3x2, v=2) dropping into the open box from above, in 4
+// discrete steps (blocky motion, matching the belt's own stepped idiom
+// rather than a smooth glide): 2 steps still above the box (visible in the
+// open air over the flaps), then 2 steps settled inside the interior. Only
+// called while the flaps are open (p < 0.45) — it isn't drawn again once
+// folding starts, so it reads as "settled inside, then occluded" rather
+// than lingering through the fold.
+function drawPackingSlip(f: Frame, x: number, boxTop: number, dropP: number): void {
+  const steps = 4;
+  const stepIdx = Math.min(steps - 1, Math.floor(clamp(dropP, 0, 0.999) * steps));
+  const ys = [boxTop - 5, boxTop - 2, boxTop + 1, boxTop + 4]; // above -> above -> inside -> inside
+  fillRect(f, x + 4, ys[stepIdx] ?? (ys[3] as number), 3, 2, 2);
+}
+
+// Flap fold: each flap is a short (3px) line hinged at its box-top corner,
+// animated through 4 keyframes — outward-up, upright, angled inward, then
+// flat (folded onto the top edge) — mirrored left/right. Quantized to
+// discrete keyframes (not interpolated) for the same blocky-motion reason
+// as the packing slip. All strokes are v=2 — this phase never touches the
+// v=3 tape-gun budget (see the domain glyph's intensity-budget comment).
+function drawFoldingFlaps(f: Frame, x: number, boxTop: number, boxW: number, foldP: number): void {
+  const kfCount = 4;
+  const kf = Math.min(kfCount - 1, Math.floor(clamp(foldP, 0, 0.999) * kfCount));
+  if (kf === 3) {
+    // Fully folded flat — the same top-edge treatment the tape pass expects
+    // to start from.
+    hline(f, x, x + boxW - 1, boxTop, 2);
+    return;
+  }
+  // Tip offset (dx, dy) from each hinge corner: outward-up -> upright ->
+  // inward. Left and right mirror around the box's vertical centerline.
+  const leftTip: readonly [number, number] = kf === 0 ? [-3, -3] : kf === 1 ? [0, -3] : [3, -3];
+  const rightTip: readonly [number, number] = kf === 0 ? [3, -3] : kf === 1 ? [0, -3] : [-3, -3];
+  const leftHingeX = x;
+  const rightHingeX = x + boxW - 1;
+  plotLine(f, leftHingeX, boxTop, leftHingeX + leftTip[0], boxTop + leftTip[1], 2);
+  plotLine(f, rightHingeX, boxTop, rightHingeX + rightTip[0], boxTop + rightTip[1], 2);
+}
+
 // tt-8l shipping-department box states, driven by phase p in [0, 1) of the
 // per-box cycle. Body is a fixed 12x8 outline at y=14; only its x position
-// and the top-edge treatment (open flaps / closing flaps / tape pass /
-// sealed) change across the phase.
+// and the top-edge treatment change across the phase: slide-in (open flaps)
+// -> packing slip drops in (flaps still open) -> flaps fold closed (hinged,
+// angular keyframes) -> tape pass -> slide out sealed.
 function drawShippingBox(f: Frame, p: number): void {
   const boxTop = 14;
   const boxW = 12;
   let x: number;
-  if (p < 0.35) {
-    x = Math.round(-14 + (p / 0.35) * 40); // slide in: -14 -> 26
-  } else if (p < 0.7) {
-    x = 26; // parked under the tape gun
+  if (p < 0.3) {
+    x = Math.round(-14 + (p / 0.3) * 40); // slide in: -14 -> 26
+  } else if (p < 0.75) {
+    x = 26; // parked: paper drop, flap fold, tape pass
   } else {
-    x = Math.round(26 + ((p - 0.7) / 0.3) * 40); // slide out: 26 -> 66
+    x = Math.round(26 + ((p - 0.75) / 0.25) * 40); // slide out: 26 -> 66
   }
   rect(f, x, boxTop, boxW, 8, 2);
 
-  if (p < 0.35) {
+  if (p < 0.3) {
+    // Open flaps, angled outward-up — the slide-in look, unchanged.
     for (let i = 1; i <= 3; i++) {
       px(f, x - i, boxTop - i, 2);
       px(f, x + boxW - 1 + i, boxTop - i, 2);
     }
-  } else if (p < 0.5) {
-    const len = Math.max(0, Math.round(3 * (1 - (p - 0.35) / 0.15)));
-    if (len === 0) {
-      hline(f, x, x + boxW - 1, boxTop, 2);
-    } else {
-      for (let i = 1; i <= len; i++) {
-        px(f, x - i, boxTop - i, 2);
-        px(f, x + boxW - 1 + i, boxTop - i, 2);
-      }
+  } else if (p < 0.45) {
+    // Flaps stay open while the packing slip drops in.
+    for (let i = 1; i <= 3; i++) {
+      px(f, x - i, boxTop - i, 2);
+      px(f, x + boxW - 1 + i, boxTop - i, 2);
     }
-  } else if (p < 0.7) {
+    drawPackingSlip(f, x, boxTop, (p - 0.3) / 0.15);
+  } else if (p < 0.6) {
+    drawFoldingFlaps(f, x, boxTop, boxW, (p - 0.45) / 0.15);
+  } else if (p < 0.75) {
     // Tape pass: the sealed trail behind the gun stays bulk v=2 (the global
     // domain rule caps v=3 to small accents, not a growing hline) — only the
     // gun's leading edge gets a <=2px v=3 accent riding at its head.
-    const tapeX = x + Math.round(((p - 0.5) / 0.2) * (boxW - 1));
+    const tapeX = x + Math.round(((p - 0.6) / 0.15) * (boxW - 1));
     hline(f, x, tapeX, boxTop, 2);
     px(f, tapeX, boxTop, 3);
     if (tapeX - 1 >= x) px(f, tapeX - 1, boxTop, 3);
@@ -573,13 +685,15 @@ export function blastOffFrame(elapsedMs: number): Frame {
 }
 
 // Bresenham line: plots every integer cell from (x0,y0) to (x1,y1) so each
-// step is Chebyshev-adjacent to the last — the continuity primitive
-// drawHeartRing uses to bridge consecutive curve samples. (Fix round 1:
-// the original heart ring plotted samples as isolated dots; at r≈8-12 the
-// cusp-heavy parametrization below spaces consecutive rounded samples more
-// than 1px apart on the flanks, so the outline fragmented into scatter
-// instead of reading as a closed shape. Bridging guarantees a connected
-// chain regardless of sample spacing or r.)
+// step is Chebyshev-adjacent to the last — the shared continuity primitive.
+// Two independent users bridge sample dots into a connected chain with it:
+// drawHeartRing (fix round 1: at r≈8-12 the cusp-heavy heart parametrization
+// spaces consecutive rounded samples more than 1px apart on the flanks,
+// fragmenting the outline into scatter) and tracePointPlotter, used by
+// drawPqrst/drawAfibComplex (fix round 2: the ECG's QRS strokes cross 5-8
+// rows in a single x-step, leaving the same kind of isolated dots). Hoisted
+// above its first use here (tracePointPlotter, earlier in this file) by
+// JS's `function`-declaration semantics.
 function plotLine(f: Frame, x0: number, y0: number, x1: number, y1: number, v: number): void {
   let x = x0;
   let y = y0;
