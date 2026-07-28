@@ -43,3 +43,39 @@ describe("scrubExcerpt corpus", () => {
     expect(out.length).toBeLessThanOrEqual(EXCERPT_MAX_LEN);
   });
 });
+
+describe("redact terms", () => {
+  it("replaces a term case-insensitively with [project]", () => {
+    expect(scrubExcerpt("The ExampleProj repo and exampleproj CI", ["exampleproj"])).toBe(
+      "The [project] repo and [project] CI",
+    );
+  });
+
+  it("replaces multiple terms independently", () => {
+    expect(scrubExcerpt("acme-org owns acme-workers", ["acme-org", "acme-workers"])).toBe(
+      "[project] owns [project]",
+    );
+  });
+
+  it("defaults to no term redaction", () => {
+    expect(scrubExcerpt("plain prose stays")).toBe("plain prose stays");
+  });
+
+  it("never touches the droidkluster brand unless explicitly listed", () => {
+    expect(scrubExcerpt("droidkluster fleet works on exampleproj", ["exampleproj"])).toBe(
+      "droidkluster fleet works on [project]",
+    );
+  });
+
+  it("escapes regex metacharacters in terms", () => {
+    expect(scrubExcerpt("repo a.b+c here", ["a.b+c"])).toBe("repo [project] here");
+    // The dot must not act as a wildcard:
+    expect(scrubExcerpt("axb+c untouched", ["a.b+c"])).toBe("axb+c untouched");
+  });
+
+  it("kill rules still run first: a term inside a URL is already gone", () => {
+    expect(scrubExcerpt("see https://github.com/acme-org/x for it", ["acme-org"])).toBe(
+      "see [redacted] for it",
+    );
+  });
+});

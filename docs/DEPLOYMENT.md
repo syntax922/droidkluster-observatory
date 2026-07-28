@@ -2,8 +2,8 @@
 
 This is the manual setup runbook for the two halves of the observatory:
 the Cloudflare edge (R2 bucket + Pages site, click-through, no IaC yet)
-and the projector (containerized, deployed from the private the-gitops-repo
-GitOps repo).
+and the projector (containerized, deployed from the private GitOps
+repo).
 
 See [`THREAT_MODEL.md`](../THREAT_MODEL.md) for why the projector only
 ever pushes outbound and never accepts inbound connections.
@@ -24,7 +24,7 @@ ever pushes outbound and never accepts inbound connections.
    - Save the resulting Access Key ID, Secret Access Key, and Account ID —
      they map to `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and
      `R2_ACCOUNT_ID` below. They're shown once; store them in the private
-     the-gitops-repo secret store, not in this repo.
+     secret store, not in this repo.
 
 ## 2. Cloudflare: Pages site
 
@@ -77,7 +77,7 @@ rather than degrading silently.
 | `NATS_CA_FILE` | `/etc/observatory/ca.pem` | no | no | Path to a CA cert for TLS verification, if the NATS server needs one. Public cert material. |
 | `NATS_STREAM` | `EVENTS` | yes | no | JetStream stream name. |
 | `NATS_DURABLE` | `observatory-projector-v1` | yes | no | Durable consumer name. **See the filter-change gotcha below before bumping `NATS_FILTER_SUBJECTS` without also bumping this.** |
-| `NATS_FILTER_SUBJECTS` | `gh.event.project.>,project.event.merge_decision.reached.>,droidkluster.event.coder.completed.>` | yes | no | Comma-separated subject filters for the durable consumer. |
+| `NATS_FILTER_SUBJECTS` | `gh.event.<repo>.>,<repo>.event.merge_decision.reached.>,droidkluster.event.coder.completed.>` | yes | no | Comma-separated subject filters for the durable consumer. |
 | `R2_ACCOUNT_ID` | `a1b2c3d4e5f6...` | yes | no | Cloudflare account ID, from step 1.3 above. An identifier, not a secret by itself. |
 | `R2_BUCKET` | `observatory` | yes | no | Must match the bucket created in step 1.1. |
 | `R2_ACCESS_KEY_ID` | `f0e1d2c3b4a5...` | yes | **yes** | From the bucket-scoped API token, step 1.3. |
@@ -86,6 +86,8 @@ rather than degrading silently.
 | `PUSH_DEBOUNCE_MS` | `10000` | no | no | Defaults to `10000`. Coalescing window for on-event pushes to `current.json` / the day's feed. |
 | `PUSH_HEARTBEAT_MS` | `60000` | no | no | Defaults to `60000`. Interval for the `last_contact` heartbeat push even when idle. |
 | `OBSERVATORY_IGNORE_PRS` | `99999` | no | no | Defaults to `99999`, the fleet's synthetic canary PR. Comma-separated list of PR numbers filtered out of public artifacts at the `reduce()` boundary, before any droid-status/chain/feed mutation — a canary PR never flips a droid task, never opens a chain, and never appears in the feed. Throws on a non-integer entry. |
+| `OBSERVATORY_SOURCE_REPO` | `my-private-repo` | yes | no | Subject-token of the observed repo (`gh.event.<token>.*`). Value lives only in private cluster config — never committed, never present in public code or the browser bundle. |
+| `OBSERVATORY_REDACT_TERMS` | `my-private-repo,my-org` | no | no | Defaults to empty. Comma-separated list of literal private names replaced with `[project]` in all public prose (review excerpts, check-run names) at the `reduce()` boundary. Never include any string containing `droidkluster` — that's the public brand and stays visible by design. |
 
 ### The durable-consumer filter-change gotcha
 
@@ -107,7 +109,7 @@ NATS auth or connectivity problem when it's actually a stale durable
 config.
 
 Verified: the canon `EVENTS` stream's subjects cover all three observatory
-subject families — `gh.event.>`, `project.event.>`, and
+subject families — `gh.event.>`, `<repo>.event.>`, and
 `droidkluster.event.>` — so a single durable consumer with the three
 `NATS_FILTER_SUBJECTS` filters above is sufficient. No second consumer or
 second stream is needed. See the durable filter-change gotcha above if you
@@ -121,7 +123,7 @@ image **`ghcr.io/<owner>/observatory-projector`** (published by
 [`.github/workflows/image.yml`](../.github/workflows/image.yml), tagged
 by commit SHA on every push to `main` and on `v*` tags).
 
-**The k8s manifests themselves live in the private the-gitops-repo repo, not
+**The k8s manifests themselves live in the private GitOps repo, not
 here** — this repo publishes the image and documents the env-var
 contract; the deployment spec, secret mounts (for
 `NATS_NKEY_SEED_FILE`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`), and

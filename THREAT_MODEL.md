@@ -3,16 +3,16 @@
 This document covers the observatory's own attack surface: the projector
 process, the edge data store, and the public site. It does not cover the
 private droidkluster cluster's internal security posture — that lives in
-the private `private-worker-repo` / the-gitops-repo repos and is out of scope
-here by design (see [Trust zones](#trust-zones)).
+the fleet's private worker repo / the private GitOps repo and is out of
+scope here by design (see [Trust zones](#trust-zones)).
 
 ## Assets
 
 What's actually at risk if something in this system goes wrong:
 
-- **Private repository content.** `private-worker-repo` (worker
+- **Private repository content.** The fleet's private worker repo (worker
   source, review/CI-diagnosis logic, NATS subject wiring in full) and the
-  the-gitops-repo GitOps repo (cluster manifests, secret references) are private.
+  private GitOps repo (cluster manifests, secret references) are private.
   Nothing in this system is meant to expose their contents beyond what the
   observatory intentionally re-publishes as sanitized events.
 - **Cluster credentials.** NATS auth material (nkey seeds), the GitHub App
@@ -139,6 +139,20 @@ before it's written to the edge store:
   exhibit. The corpus and the two safety valves above carry the risk
   instead.
 
+## Source-repo redaction
+
+The names of the private repos this fleet works on are themselves
+treated as private. Public code carries only the mechanism: the reducer
+takes its subject token from `OBSERVATORY_SOURCE_REPO`, and the
+sanitizer's redact-term list arrives via `OBSERVATORY_REDACT_TERMS` —
+both values live in private cluster config. The site's replay engine
+round-trips through a neutral `"project"` token, so the served bundle
+contains no private name. Repo history was rewritten (git-filter-repo)
+when this landed. Known residual: GitHub retains merged-PR diffs from
+before the rewrite, which can contain pre-redaction names; treated as
+accepted risk (the names gate access to nothing — the repos are
+private), documented rather than hidden.
+
 ## Bot management: a documented rejection and a substitution
 
 Controls on this site are chosen by threat fit, and one common control was
@@ -171,8 +185,8 @@ evaluated and deliberately turned off.
 
 - **NATS subject naming is visible in public source (accepted).** The
   reducer's `classify()` function matches literal subject prefixes —
-  `project.event.merge_decision.reached.*`,
-  `gh.event.project.*` — which reveals the fleet's internal
+  `<repo>.event.merge_decision.reached.*`,
+  `gh.event.<repo>.*` — which reveals the fleet's internal
   event-bus naming convention to anyone reading the public repo. This is
   an accepted tradeoff, not an oversight: those subjects are unreachable
   from the internet (no listener exists outside Zone 1, per the diode

@@ -5,11 +5,13 @@ import { ReplayBundleSchema } from "@observatory/core";
 import { describe, expect, it } from "vitest";
 import { ingest } from "./ingest.js";
 
+const OPTS = { repo: "exampleproj" };
+
 const lines = [
   {
     kind: "event",
     id: "r1",
-    subject: "gh.event.project.pr.opened.42",
+    subject: "gh.event.exampleproj.pr.opened.42",
     ts: "2026-07-25T10:00:00Z",
     payload: {
       action: "opened",
@@ -20,7 +22,7 @@ const lines = [
   {
     kind: "event",
     id: "r2",
-    subject: "gh.event.project.pr.review_started.42",
+    subject: "gh.event.exampleproj.pr.review_started.42",
     ts: "2026-07-25T10:05:00Z",
     payload: {
       action: "review_started",
@@ -31,7 +33,7 @@ const lines = [
   {
     kind: "event",
     id: "r3",
-    subject: "gh.event.project.pull_request_review.submitted.42",
+    subject: "gh.event.exampleproj.pull_request_review.submitted.42",
     ts: "2026-07-25T10:09:00Z",
     payload: {
       action: "submitted",
@@ -43,7 +45,7 @@ const lines = [
   {
     kind: "event",
     id: "r4",
-    subject: "gh.event.project.pr.closed.42",
+    subject: "gh.event.exampleproj.pr.closed.42",
     ts: "2026-07-25T10:20:00Z",
     payload: {
       action: "closed",
@@ -58,7 +60,7 @@ describe("ingest", () => {
     const dir = mkdtempSync(join(tmpdir(), "ingest-"));
     const input = join(dir, "rec.jsonl");
     writeFileSync(input, lines.map((l) => JSON.stringify(l)).join("\n"));
-    const written = ingest(input, dir);
+    const written = ingest(input, dir, OPTS);
     expect(written).toEqual(["pr-42-2026-07-25.json"]);
     const bundle = ReplayBundleSchema.parse(
       JSON.parse(readFileSync(join(dir, "pr-42-2026-07-25.json"), "utf8")),
@@ -71,7 +73,7 @@ describe("ingest", () => {
     const dir = mkdtempSync(join(tmpdir(), "ingest-"));
     const input = join(dir, "rec.jsonl");
     writeFileSync(input, JSON.stringify(lines[0]));
-    expect(ingest(input, dir)).toEqual([]);
+    expect(ingest(input, dir, OPTS)).toEqual([]);
     expect(readdirSync(dir).filter((f) => f.endsWith(".json"))).toEqual([]);
   });
 
@@ -88,7 +90,7 @@ describe("ingest", () => {
       },
     }));
     writeFileSync(input, [...lines, ...canaryLines].map((l) => JSON.stringify(l)).join("\n"));
-    const written = ingest(input, dir);
+    const written = ingest(input, dir, OPTS);
     expect(written).toEqual(["pr-42-2026-07-25.json"]);
     expect(written.some((f) => f.includes("99999"))).toBe(false);
   });
@@ -98,7 +100,7 @@ describe("ingest", () => {
     const outDir = join(tempBase, "nonexistent", "subdir");
     const input = join(tempBase, "rec.jsonl");
     writeFileSync(input, lines.map((l) => JSON.stringify(l)).join("\n"));
-    const written = ingest(input, outDir);
+    const written = ingest(input, outDir, OPTS);
     expect(written).toEqual(["pr-42-2026-07-25.json"]);
     const bundle = ReplayBundleSchema.parse(
       JSON.parse(readFileSync(join(outDir, "pr-42-2026-07-25.json"), "utf8")),
