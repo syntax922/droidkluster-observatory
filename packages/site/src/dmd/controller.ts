@@ -1,4 +1,6 @@
 import type { DroidId, DroidStatus } from "@observatory/core";
+import type { DroidPurview, Purview } from "../purview.js";
+import { type FlapBoard, createFlapBoard } from "./flapboard.js";
 import { type DmdState, dmdFrame } from "./glyphs.js";
 import { paintFrame } from "./painter.js";
 import { ACCENTS } from "./palette.js";
@@ -15,6 +17,7 @@ export interface BoardView {
   // cool relative to the replayed snapshot's own generated_at rather than
   // real wall time racing ahead of the story being replayed.
   renderedAtMs: number;
+  purview: Purview;
 }
 
 // How long a droid's DMD keeps a visible afterglow after its last recorded
@@ -26,11 +29,13 @@ export function deriveDmdState(
   droid: DroidStatus,
   celebrating: boolean,
   nowMs: number,
+  purview: DroidPurview,
 ): DmdState {
   if (mode === "stale") return "stale";
   if (celebrating) return "celebrate";
   if (droid.state === "active") return "active";
   if (mode === "live" || mode === "replay") {
+    if (purview.domainActive) return "domain";
     if (droid.last_action_at !== undefined) {
       const ageMin = (nowMs - Date.parse(droid.last_action_at)) / 60_000;
       if (ageMin >= 0 && ageMin <= COOLING_MIN) return "cooling";
@@ -62,6 +67,16 @@ export function startDmd(opts: StartDmdOpts): () => void {
     (typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches);
   let stopped = false;
   let lastPaint = 0;
+  const boards = new Map<DroidId, FlapBoard>();
+
+  function boardFor(droid: DroidId): FlapBoard {
+    let board = boards.get(droid);
+    if (!board) {
+      board = createFlapBoard();
+      boards.set(droid, board);
+    }
+    return board;
+  }
 
   function canvases(): Array<{ el: HTMLCanvasElement; droid: DroidId }> {
     // Array.from (not spread) — NodeListOf isn't Iterable under this
@@ -73,16 +88,24 @@ export function startDmd(opts: StartDmdOpts): () => void {
   }
 
   function paintAll(t: number): string {
-    const board = opts.getBoard();
+    const view = opts.getBoard();
     const parts: string[] = [];
     for (const { el, droid } of canvases()) {
-      const status = board.droids.find((d) => d.droid === droid) ?? {
+      const status = view.droids.find((d) => d.droid === droid) ?? {
         droid,
         state: "idle" as const,
       };
-      const state = deriveDmdState(board.mode, status, board.celebrating, board.renderedAtMs);
+      const purview = view.purview[droid];
+      const state = deriveDmdState(view.mode, status, view.celebrating, view.renderedAtMs, purview);
       parts.push(`${droid}:${state}`);
-      paint(el, dmdFrame(droid, state, t), ACCENTS[droid]);
+      const flapBoard = boardFor(droid);
+      flapBoard.setPrs(state === "stale" || state === "celebrate" ? [] : purview.prs, t);
+      const frame = dmdFrame(droid, state, t, {
+        primary: purview.prs.length,
+        secondary: purview.secondary,
+      });
+      flapBoard.overlay(frame, t, reduced);
+      paint(el, frame, ACCENTS[droid]);
     }
     return parts.join("|");
   }

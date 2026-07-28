@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
+import { emptyPurview } from "../purview.js";
 import { COOLING_MIN, deriveDmdState, startDmd } from "./controller.js";
 import { dmdFrame } from "./glyphs.js";
 
 const NOW = Date.parse("2026-07-27T12:00:00Z");
+
+const P0 = { prs: [], domainActive: false, secondary: 0 };
+const PD = { prs: [7, 8], domainActive: true, secondary: 0 };
 
 describe("deriveDmdState", () => {
   const idle = { droid: "r5", state: "idle" } as const;
@@ -13,30 +17,30 @@ describe("deriveDmdState", () => {
     last_action_at: new Date(NOW - 2 * 60_000).toISOString(),
   } as const;
   it("stale mode overrides everything, including an active droid", () => {
-    expect(deriveDmdState("stale", active, false, NOW)).toBe("stale");
+    expect(deriveDmdState("stale", active, false, NOW, P0)).toBe("stale");
   });
   it("celebrating overrides active/idle in live mode", () => {
-    expect(deriveDmdState("live", idle, true, NOW)).toBe("celebrate");
+    expect(deriveDmdState("live", idle, true, NOW, P0)).toBe("celebrate");
   });
   it("active droid in live mode animates its glyph, overriding cooling", () => {
     const activeButRecent = { ...active, last_action_at: new Date(NOW - 60_000).toISOString() };
-    expect(deriveDmdState("live", activeButRecent, false, NOW)).toBe("active");
+    expect(deriveDmdState("live", activeButRecent, false, NOW, P0)).toBe("active");
   });
   it("replay mode renders the replayed droid states, not stale", () => {
-    expect(deriveDmdState("replay", active, false, NOW)).toBe("active");
+    expect(deriveDmdState("replay", active, false, NOW, P0)).toBe("active");
   });
   it("recently-acted idle droid cools in live mode", () => {
-    expect(deriveDmdState("live", recentlyIdle, false, NOW)).toBe("cooling");
+    expect(deriveDmdState("live", recentlyIdle, false, NOW, P0)).toBe("cooling");
   });
   it("recently-acted idle droid cools in replay mode against the replayed clock", () => {
-    expect(deriveDmdState("replay", recentlyIdle, false, NOW)).toBe("cooling");
+    expect(deriveDmdState("replay", recentlyIdle, false, NOW, P0)).toBe("cooling");
   });
   it("idle droid with no last_action_at is plain idle, not cooling", () => {
-    expect(deriveDmdState("live", idle, false, NOW)).toBe("idle");
+    expect(deriveDmdState("live", idle, false, NOW, P0)).toBe("idle");
   });
   it("cooling does not apply in stale or idle board modes", () => {
-    expect(deriveDmdState("stale", recentlyIdle, false, NOW)).toBe("stale");
-    expect(deriveDmdState("idle", recentlyIdle, false, NOW)).toBe("idle");
+    expect(deriveDmdState("stale", recentlyIdle, false, NOW, P0)).toBe("stale");
+    expect(deriveDmdState("idle", recentlyIdle, false, NOW, P0)).toBe("idle");
   });
   it(`falls back to idle exactly at the ${COOLING_MIN}-minute boundary and past it`, () => {
     const atBoundary = {
@@ -54,9 +58,42 @@ describe("deriveDmdState", () => {
       state: "idle",
       last_action_at: new Date(NOW - (COOLING_MIN * 60_000 - 1000)).toISOString(),
     } as const;
-    expect(deriveDmdState("live", atBoundary, false, NOW)).toBe("cooling"); // inclusive
-    expect(deriveDmdState("live", justPast, false, NOW)).toBe("idle");
-    expect(deriveDmdState("live", justUnder, false, NOW)).toBe("cooling");
+    expect(deriveDmdState("live", atBoundary, false, NOW, P0)).toBe("cooling"); // inclusive
+    expect(deriveDmdState("live", justPast, false, NOW, P0)).toBe("idle");
+    expect(deriveDmdState("live", justUnder, false, NOW, P0)).toBe("cooling");
+  });
+  it("domain outranks cooling but not active", () => {
+    const recent = new Date(NOW - 60_000).toISOString();
+    expect(
+      deriveDmdState(
+        "live",
+        { droid: "2-1b", state: "idle", last_action_at: recent },
+        false,
+        NOW,
+        PD,
+      ),
+    ).toBe("domain");
+    expect(deriveDmdState("live", { droid: "2-1b", state: "active" }, false, NOW, PD)).toBe(
+      "active",
+    );
+  });
+  it("stale and celebrate outrank domain", () => {
+    expect(deriveDmdState("stale", { droid: "2-1b", state: "idle" }, false, NOW, PD)).toBe("stale");
+    expect(deriveDmdState("live", { droid: "2-1b", state: "idle" }, true, NOW, PD)).toBe(
+      "celebrate",
+    );
+  });
+  it("no purview -> cooling/idle unchanged", () => {
+    const recent = new Date(NOW - 60_000).toISOString();
+    expect(
+      deriveDmdState(
+        "live",
+        { droid: "2-1b", state: "idle", last_action_at: recent },
+        false,
+        NOW,
+        P0,
+      ),
+    ).toBe("cooling");
   });
 });
 
@@ -88,6 +125,7 @@ describe("startDmd", () => {
         droids: [{ droid: "r5", state: "idle" }],
         celebrating: false,
         renderedAtMs: NOW,
+        purview: emptyPurview(),
       }),
     });
     expect(raf).not.toHaveBeenCalled();
@@ -109,6 +147,7 @@ describe("startDmd", () => {
           droids: [{ droid: "r5", state: "idle" }],
           celebrating: false,
           renderedAtMs: NOW,
+          purview: emptyPurview(),
         }),
       });
       // Immediate paint pass at start.
@@ -147,6 +186,7 @@ describe("startDmd", () => {
         droids: [{ droid: "hk-47", state: "active", task: "reviewing PR #1" }],
         celebrating: false,
         renderedAtMs: NOW,
+        purview: emptyPurview(),
       }),
     });
     expect(raf).toHaveBeenCalledTimes(1);

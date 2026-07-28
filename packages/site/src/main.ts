@@ -8,6 +8,7 @@ import { initIntro } from "./intro.js";
 import type { LaneState } from "./journey-controller.js";
 import { startJourneys } from "./journey-controller.js";
 import { buildLiveLanes, buildReplayLane } from "./journey-lanes.js";
+import { emptyPurview } from "./purview.js";
 import { renderChains } from "./render/chains.js";
 import { renderDossier } from "./render/dossier.js";
 import { renderHonesty } from "./render/honesty.js";
@@ -43,6 +44,7 @@ let lastBoard: BoardView = {
   droids: [],
   celebrating: false,
   renderedAtMs: Date.now(),
+  purview: emptyPurview(),
 };
 
 // Tracks the latest per-chain journey state for the journey controller's
@@ -109,6 +111,7 @@ function renderLive(snap: CurrentSnapshot): void {
     droids: snap.droids,
     celebrating: celebration.observe(snap.chains),
     renderedAtMs: now,
+    purview: emptyPurview(),
   };
 }
 
@@ -150,6 +153,7 @@ const replay = createReplayController({
       droids: snap.droids,
       celebrating: celebration.observe(snap.chains),
       renderedAtMs: replayNow,
+      purview: emptyPurview(),
     };
   },
   onIdle: (lastContact) => {
@@ -161,6 +165,7 @@ const replay = createReplayController({
       droids: lastBoard.droids,
       celebrating: false,
       renderedAtMs: lastBoard.renderedAtMs,
+      purview: lastBoard.purview,
     };
     laneState = laneState.map((s) => ({ ...s, dimmed: true }));
   },
@@ -205,6 +210,7 @@ startPolling({
         droids: lastBoard.droids,
         celebrating: false,
         renderedAtMs: lastBoard.renderedAtMs,
+        purview: lastBoard.purview,
       };
       laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     } else {
@@ -224,6 +230,7 @@ startPolling({
         droids: lastBoard.droids,
         celebrating: false,
         renderedAtMs: lastBoard.renderedAtMs,
+        purview: lastBoard.purview,
       };
       laneState = laneState.map((s) => ({ ...s, dimmed: true }));
     }

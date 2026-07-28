@@ -1,7 +1,15 @@
 import type { DroidId } from "@observatory/core";
 import { DMD_H, DMD_W, type Frame, blank, fillRect, hline, px, rect, vline } from "./frame.js";
 
-export type DmdState = "idle" | "active" | "stale" | "celebrate" | "cooling";
+export type DmdState = "idle" | "active" | "stale" | "celebrate" | "cooling" | "domain";
+
+// primary = purview.prs.length (the flap-board's page count); secondary is
+// per-droid load (see purview.ts DroidPurview.secondary) — r5: in-flight
+// dispatches; hk-47: reviews posted in window; others 0.
+export interface GlyphCounts {
+  primary: number;
+  secondary: number;
+}
 
 // Deterministic PRNG for stale static (mulberry32) — seeded per time bucket.
 function mulberry32(seed: number): () => number {
@@ -61,6 +69,13 @@ function celebrateFrame(tMs: number): Frame {
 
 // Per-droid active glyphs — filled by Task 7. Fallback: idle.
 export const activeGlyphs: Partial<Record<DroidId, (tMs: number) => Frame>> = {};
+
+// Per-droid domain glyphs — filled by Tasks 4-5 (2-1b ECG + tt-8l shipping,
+// hk-47 desk + r5 weld line). A droid with no entry here falls back to the
+// cooling lift (see dmdFrame's "domain" case) rather than a fabricated
+// animation — no glyph is better than an invented one.
+export const domainGlyphs: Partial<Record<DroidId, (tMs: number, counts: GlyphCounts) => Frame>> =
+  {};
 
 // hk-47 — reviewing: document outline, text stipple, bright scanline sweeping down.
 activeGlyphs["hk-47"] = (t) => {
@@ -242,7 +257,12 @@ function coolingFrame(droid: DroidId, tMs: number): Frame {
   return f;
 }
 
-export function dmdFrame(droid: DroidId, state: DmdState, tMs: number): Frame {
+export function dmdFrame(
+  droid: DroidId,
+  state: DmdState,
+  tMs: number,
+  counts?: GlyphCounts,
+): Frame {
   switch (state) {
     case "idle":
       return (standbyGlyphs[droid] ?? idleFrame)(tMs);
@@ -254,5 +274,9 @@ export function dmdFrame(droid: DroidId, state: DmdState, tMs: number): Frame {
       return celebrateFrame(tMs);
     case "active":
       return (activeGlyphs[droid] ?? idleFrame)(tMs);
+    case "domain": {
+      const glyph = domainGlyphs[droid];
+      return glyph ? glyph(tMs, counts ?? { primary: 0, secondary: 0 }) : coolingFrame(droid, tMs);
+    }
   }
 }

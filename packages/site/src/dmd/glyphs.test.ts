@@ -152,3 +152,11 @@ describe("cooling", () => {
     }
   });
 });
+
+describe("domain", () => {
+  it("domain without a domain glyph falls back to the cooling lift", () => {
+    const dom = dmdFrame("ev-9d9", "domain", 1234, { primary: 1, secondary: 0 });
+    const cool = dmdFrame("ev-9d9", "cooling", 1234);
+    expect(Array.from(dom)).toEqual(Array.from(cool));
+  });
+});
