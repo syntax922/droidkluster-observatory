@@ -4,6 +4,7 @@ import { createCelebrationTracker } from "./celebrate.js";
 import { fetchReplayBundle, fetchReplayIndex, startPolling } from "./data.js";
 import type { BoardView } from "./dmd/controller.js";
 import { startDmd } from "./dmd/controller.js";
+import { initIntro } from "./intro.js";
 import type { LaneState } from "./journey-controller.js";
 import { startJourneys } from "./journey-controller.js";
 import { buildLiveLanes, buildReplayLane } from "./journey-lanes.js";
@@ -26,6 +27,8 @@ const els = {
   chains: document.querySelector("#chains") as HTMLElement,
   journeys: document.querySelector("#journeys") as HTMLElement,
   dossier: document.querySelector("#dossier") as HTMLElement,
+  intro: document.querySelector("#intro") as HTMLElement,
+  aboutToggle: document.querySelector("#about-toggle") as HTMLElement,
 };
 
 // Tracks the last known heartbeat so replay frames (which don't carry it —
@@ -166,6 +169,13 @@ const replay = createReplayController({
 // Deploy stamp: inspectable in devtools, and guarantees each deploy re-hashes
 // the bundle past any edge-cached artifact of the previous one.
 document.documentElement.dataset.build = "2026-07-27";
+
+initIntro({
+  root: els.intro,
+  toggle: els.aboutToggle,
+  storage: localStorage,
+  reducedMotion: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+});
 
 startDmd({ root: els.stations, getBoard: () => lastBoard });
 startJourneys({ root: els.journeys, getLanes: () => laneState });
