@@ -47,15 +47,6 @@ describe("active glyphs", () => {
       expect(dmdFrame(d, "active", 0)).not.toEqual(dmdFrame(d, "active", 700));
     }
   });
-  it("hk-47 scanline: exactly one full-brightness row inside the document sweeps over time", () => {
-    const rowAt = (t: number) => {
-      const f = dmdFrame("hk-47", "active", t);
-      for (let y = 5; y < 27; y++) if (f[y * 64 + 24] === 3) return y;
-      return -1;
-    };
-    expect(rowAt(0)).toBeGreaterThanOrEqual(5);
-    expect(rowAt(0)).not.toBe(rowAt(1100));
-  });
   it("all active glyphs stay in bounds and <= 3 across a full cycle", () => {
     for (const d of DROIDS)
       for (const t of [0, 250, 500, 1000, 2000, 4000]) {
@@ -221,6 +212,94 @@ describe("tt-8l shipping department", () => {
     ] as const) {
       const f = dmdFrame("tt-8l", state as DmdState, 500, counts as GlyphCounts | undefined);
       for (let y = 25; y < 32; y++) for (let x = 0; x < 64; x++) expect(f[y * 64 + x] ?? 0).toBe(0);
+    }
+  });
+});
+
+describe("hk-47 desk", () => {
+  it("inbox scales with reviews in flight, outbox with posted", () => {
+    const a = dmdFrame("hk-47", "active", 500, { primary: 1, secondary: 0 });
+    const b = dmdFrame("hk-47", "active", 500, { primary: 4, secondary: 0 });
+    const c = dmdFrame("hk-47", "active", 500, { primary: 1, secondary: 3 });
+    expect(Array.from(a)).not.toEqual(Array.from(b));
+    expect(Array.from(a)).not.toEqual(Array.from(c));
+  });
+  it("domain is dimmer than active and sheetless (static between animation ticks)", () => {
+    const d1 = dmdFrame("hk-47", "domain", 500, { primary: 2, secondary: 0 });
+    const d2 = dmdFrame("hk-47", "domain", 731, { primary: 2, secondary: 0 });
+    expect(Array.from(d1)).toEqual(Array.from(d2)); // no motion in domain
+    expect(Math.max(...Array.from(d1))).toBeLessThanOrEqual(2);
+  });
+  it("standby is calm (<=2) and deterministic", () => {
+    expect(Array.from(dmdFrame("hk-47", "idle", 100))).toEqual(
+      Array.from(dmdFrame("hk-47", "idle", 100)),
+    );
+    expect(Math.max(...Array.from(dmdFrame("hk-47", "idle", 100)))).toBeLessThanOrEqual(2);
+  });
+  it("domain inbox/outbox scale with counts (purview height)", () => {
+    const a = dmdFrame("hk-47", "domain", 500, { primary: 1, secondary: 0 });
+    const b = dmdFrame("hk-47", "domain", 500, { primary: 4, secondary: 3 });
+    expect(Array.from(a)).not.toEqual(Array.from(b));
+  });
+  it("active inbox clamps at 6 — primary=6 and primary=9 render identically", () => {
+    const six = dmdFrame("hk-47", "active", 500, { primary: 6, secondary: 0 });
+    const nine = dmdFrame("hk-47", "active", 500, { primary: 9, secondary: 0 });
+    expect(Array.from(six)).toEqual(Array.from(nine));
+  });
+  it("active outbox clamps at 6 — secondary=6 and secondary=9 render identically", () => {
+    const six = dmdFrame("hk-47", "active", 500, { primary: 0, secondary: 6 });
+    const nine = dmdFrame("hk-47", "active", 500, { primary: 0, secondary: 9 });
+    expect(Array.from(six)).toEqual(Array.from(nine));
+  });
+  it("domain inbox/outbox clamp at 6 — 6 and 9 render identically", () => {
+    const six = dmdFrame("hk-47", "domain", 500, { primary: 6, secondary: 6 });
+    const nine = dmdFrame("hk-47", "domain", 500, { primary: 9, secondary: 9 });
+    expect(Array.from(six)).toEqual(Array.from(nine));
+  });
+});
+
+describe("r5 weld line", () => {
+  it("active sparks exist under the arch at some phase", () => {
+    // scan a full cycle: at least one tMs shows v=3 pixels in the arch region
+    let sparked = false;
+    for (let t = 0; t < 3000; t += 70) {
+      const f = dmdFrame("r5", "active", t, { primary: 0, secondary: 2 });
+      for (let y = 4; y < 16 && !sparked; y++)
+        for (let x = 26; x < 38; x++)
+          if (f[y * 64 + x] === 3) {
+            sparked = true;
+            break;
+          }
+      if (sparked) break;
+    }
+    expect(sparked).toBe(true);
+  });
+  it("domain chassis count scales with in-flight dispatches", () => {
+    const one = dmdFrame("r5", "domain", 900, { primary: 0, secondary: 1 });
+    const four = dmdFrame("r5", "domain", 900, { primary: 0, secondary: 4 });
+    expect(Array.from(one)).not.toEqual(Array.from(four));
+  });
+  it("both families stay above the flap band", () => {
+    for (const droid of ["hk-47", "r5"] as const) {
+      const f = dmdFrame(droid, "active", 640, { primary: 2, secondary: 2 });
+      for (let y = 25; y < 32; y++) for (let x = 0; x < 64; x++) expect(f[y * 64 + x] ?? 0).toBe(0);
+    }
+  });
+  it("active chassis count clamps at 4 — secondary=4 and secondary=9 render identically", () => {
+    const four = dmdFrame("r5", "active", 900, { primary: 0, secondary: 4 });
+    const nine = dmdFrame("r5", "active", 900, { primary: 0, secondary: 9 });
+    expect(Array.from(four)).toEqual(Array.from(nine));
+  });
+  it("domain chassis count clamps at 4 — secondary=4 and secondary=9 render identically", () => {
+    const four = dmdFrame("r5", "domain", 900, { primary: 0, secondary: 4 });
+    const nine = dmdFrame("r5", "domain", 900, { primary: 0, secondary: 9 });
+    expect(Array.from(four)).toEqual(Array.from(nine));
+  });
+  it("domain sparks stay within the <=2px v=3 tip cap across a full cycle", () => {
+    for (let t = 0; t < 3000; t += 70) {
+      const f = dmdFrame("r5", "domain", t, { primary: 0, secondary: 4 });
+      const bright = f.filter((v) => v === 3).length;
+      expect(bright).toBeLessThanOrEqual(2);
     }
   });
 });

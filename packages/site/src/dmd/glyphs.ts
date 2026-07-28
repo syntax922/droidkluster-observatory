@@ -41,6 +41,10 @@ function breath(tMs: number, periodMs: number): 1 | 2 {
   return (1 + Math.round((Math.cos((tMs / periodMs) * Math.PI * 2) + 1) / 2)) as 1 | 2;
 }
 
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
+}
+
 function staleFrame(tMs: number): Frame {
   const f = blank();
   const rand = mulberry32(Math.floor(tMs / 120));
@@ -67,8 +71,12 @@ function celebrateFrame(tMs: number): Frame {
   return f;
 }
 
-// Per-droid active glyphs — filled by Task 7. Fallback: idle.
-export const activeGlyphs: Partial<Record<DroidId, (tMs: number) => Frame>> = {};
+// Per-droid active glyphs — filled by Task 7. Fallback: idle. The `counts`
+// param is optional per-entry (functions with fewer declared params remain
+// assignable here); only scenes whose brightness/count is load-scaled — e.g.
+// hk-47's desk, r5's weld line — declare it.
+export const activeGlyphs: Partial<Record<DroidId, (tMs: number, counts: GlyphCounts) => Frame>> =
+  {};
 
 // Per-droid domain glyphs — filled by Tasks 4-5 (2-1b ECG + tt-8l shipping,
 // hk-47 desk + r5 weld line). A droid with no entry here falls back to the
@@ -84,13 +92,69 @@ function wrapX(x: number): number {
   return ((x % DMD_W) + DMD_W) % DMD_W;
 }
 
-// hk-47 — reviewing: document outline, text stipple, bright scanline sweeping down.
-activeGlyphs["hk-47"] = (t) => {
+// hk-47 — reviewer's desk. Shared geometry across active/domain/idle: a desk
+// (hline + two legs) with the droid's head+shoulders sitting behind it, an
+// inbox tray to the left and an outbox tray to the right. Coordinates are
+// fixed furniture; only fill levels and the animated sheet vary by state.
+const HK_DESK_X0 = 20;
+const HK_DESK_X1 = 44;
+const HK_DESK_Y = 18;
+const HK_INBOX_X0 = 4;
+const HK_INBOX_X1 = 14;
+const HK_OUTBOX_X0 = 50;
+const HK_OUTBOX_X1 = 60;
+const HK_TRAY_Y = 17;
+
+function drawHkFurniture(f: Frame, deskV: number, headShoulderV: number): void {
+  hline(f, HK_DESK_X0, HK_DESK_X1, HK_DESK_Y, deskV);
+  vline(f, 22, 19, 22, 1);
+  vline(f, 42, 19, 22, 1);
+  fillRect(f, 30, 8, 5, 4, headShoulderV); // head
+  fillRect(f, 28, 12, 9, 5, headShoulderV); // shoulders
+}
+
+// A tray of `count` items (clamped 0-6) stacked upward from the tray-bottom
+// row; an empty tray still shows a dim tray-bottom line so the furniture
+// reads even with nothing in it.
+function drawHkTray(f: Frame, x0: number, x1: number, count: number, itemV: number): void {
+  const n = clamp(count, 0, 6);
+  if (n === 0) {
+    hline(f, x0, x1, HK_TRAY_Y, 1);
+    return;
+  }
+  for (let i = 0; i < n; i++) hline(f, x0, x1, HK_TRAY_Y - i, itemV);
+}
+
+// The single sheet that carries through the review cycle: inbox -> desk
+// (read, flickering) -> outbox, on a 2200ms loop.
+function drawHkSheet(f: Frame, t: number): void {
+  const cycle = 2200;
+  const p = (t % cycle) / cycle;
+  const inboxX = 6;
+  const deskX = 30;
+  const outboxX = 54;
+  const y = 14;
+  let x: number;
+  if (p < 0.3) {
+    x = Math.round(inboxX + (p / 0.3) * (deskX - inboxX));
+  } else if (p < 0.7) {
+    x = deskX;
+  } else {
+    x = Math.round(deskX + ((p - 0.7) / 0.3) * (outboxX - deskX));
+  }
+  rect(f, x, y, 4, 3, 2);
+  if (p >= 0.3 && p < 0.7) {
+    // Read flicker: a single v=3 px toggling on/off per 150ms bucket.
+    if (Math.floor(t / 150) % 2 === 0) px(f, x + 1, y + 1, 3);
+  }
+}
+
+activeGlyphs["hk-47"] = (t, counts) => {
   const f = blank();
-  rect(f, 18, 4, 28, 24, 1);
-  for (let y = 7; y < 26; y += 3) hline(f, 21, 42, y, 1);
-  const scan = 5 + (Math.floor(t / 90) % 22);
-  hline(f, 19, 44, scan, 3);
+  drawHkFurniture(f, 2, 2);
+  drawHkTray(f, HK_INBOX_X0, HK_INBOX_X1, counts.primary, 2);
+  drawHkTray(f, HK_OUTBOX_X0, HK_OUTBOX_X1, counts.secondary, 2);
+  drawHkSheet(f, t);
   return f;
 };
 
@@ -163,13 +227,69 @@ activeGlyphs["ev-9d9"] = (t) => {
   return f;
 };
 
-// r5 — dispatching: packet leaving a stacked queue, crossing to the right edge.
-activeGlyphs.r5 = (t) => {
+// r5 — weld line. Shared geometry across active/domain/idle: a belt with a
+// weld-station arch; chassis units ride the belt left-to-right and spark
+// while passing under the arch.
+const R5_BELT_Y = 20;
+const R5_ARCH_X = 28;
+const R5_ARCH_Y = 10;
+const R5_ARCH_W = 8;
+const R5_ARCH_H = 10;
+const R5_CHASSIS_W = 10;
+const R5_CHASSIS_H = 5;
+const R5_CHASSIS_TOP = 15; // bottom row (19) sits just above the belt (20)
+const R5_TRAVEL_LO = -14; // fully offscreen left
+const R5_TRAVEL_HI = 78; // fully offscreen right
+const R5_CYCLE = 3000;
+const R5_ARCH_TRIGGER_LO = 26;
+const R5_ARCH_TRIGGER_HI = 38;
+
+function drawR5Belt(f: Frame, beltV: number, archV: number): void {
+  hline(f, 0, DMD_W - 1, R5_BELT_Y, beltV);
+  rect(f, R5_ARCH_X, R5_ARCH_Y, R5_ARCH_W, R5_ARCH_H, archV);
+}
+
+function r5ChassisX(p: number): number {
+  return Math.round(R5_TRAVEL_LO + p * (R5_TRAVEL_HI - R5_TRAVEL_LO));
+}
+
+// Active sparks: 5-8 px, all v=3 (active isn't domain-capped).
+function drawR5SparksActive(f: Frame, chassisX: number, t: number): void {
+  const rand = mulberry32(Math.floor(t / 70));
+  const n = 5 + Math.floor(rand() * 4);
+  for (let i = 0; i < n; i++) {
+    const dx = Math.floor(rand() * 6);
+    const dy = Math.floor(rand() * 6);
+    px(f, chassisX + dx, R5_CHASSIS_TOP - 6 + dy, 3);
+  }
+}
+
+// Domain sparks: 2-3 px, bulk v=2, at most 2 of them lifted to a v=3 tip —
+// structurally, at most one chassis is ever under the arch at once (see the
+// count<=4 non-overlap argument in the task report), so this per-call cap of
+// 2 is also the whole frame's v=3 budget.
+function drawR5SparksDomain(f: Frame, chassisX: number, t: number): void {
+  const rand = mulberry32(Math.floor(t / 70));
+  const n = 2 + Math.floor(rand() * 2);
+  const tipCount = Math.min(2, n - 1);
+  for (let i = 0; i < n; i++) {
+    const dx = Math.floor(rand() * 6);
+    const dy = Math.floor(rand() * 6);
+    px(f, chassisX + dx, R5_CHASSIS_TOP - 6 + dy, i < tipCount ? 3 : 2);
+  }
+}
+
+activeGlyphs.r5 = (t, counts) => {
   const f = blank();
-  for (let i = 0; i < 3; i++) rect(f, 6, 6 + i * 8, 10, 6, 2);
-  const x = 18 + (Math.floor(t / 60) % 42);
-  fillRect(f, x, 14, 3, 3, 3);
-  hline(f, 18, x, 15, 1); // trail
+  drawR5Belt(f, 1, 1);
+  const count = clamp(counts.secondary, 1, 4);
+  for (let j = 0; j < count; j++) {
+    const offset = (j * R5_CYCLE) / count;
+    const p = ((t + offset) % R5_CYCLE) / R5_CYCLE;
+    const x = r5ChassisX(p);
+    rect(f, x, R5_CHASSIS_TOP, R5_CHASSIS_W, R5_CHASSIS_H, 2);
+    if (x >= R5_ARCH_TRIGGER_LO && x < R5_ARCH_TRIGGER_HI) drawR5SparksActive(f, x, t);
+  }
   return f;
 };
 
@@ -292,6 +412,36 @@ function blastOffFrame(tMs: number): Frame {
   return f;
 }
 
+// hk-47 — domain: the same desk, dimmed and frozen. No sheet, no flicker —
+// domain instruments are quiet-monitoring, not a live animation — so this
+// glyph is intentionally pure-function-of-counts with tMs unused. Inbox and
+// outbox still scale with purview counts (same clamp(0,6) as active) so
+// review backlog reads at a glance; head/shoulders drop to v=1.
+domainGlyphs["hk-47"] = (_t, counts) => {
+  const f = blank();
+  drawHkFurniture(f, 2, 1);
+  drawHkTray(f, HK_INBOX_X0, HK_INBOX_X1, counts.primary, 2);
+  drawHkTray(f, HK_OUTBOX_X0, HK_OUTBOX_X1, counts.secondary, 2);
+  return f;
+};
+
+// r5 — domain: same belt+arch+chassis scene as active, but v-capped and with
+// sparser sparks (drawR5SparksDomain: bulk v=2, <=2px v=3 tip). Chassis count
+// scales 1-4 with in-flight dispatches.
+domainGlyphs.r5 = (t, counts) => {
+  const f = blank();
+  drawR5Belt(f, 1, 1);
+  const count = clamp(counts.secondary, 1, 4);
+  for (let j = 0; j < count; j++) {
+    const offset = (j * R5_CYCLE) / count;
+    const p = ((t + offset) % R5_CYCLE) / R5_CYCLE;
+    const x = r5ChassisX(p);
+    rect(f, x, R5_CHASSIS_TOP, R5_CHASSIS_W, R5_CHASSIS_H, 2);
+    if (x >= R5_ARCH_TRIGGER_LO && x < R5_ARCH_TRIGGER_HI) drawR5SparksDomain(f, x, t);
+  }
+  return f;
+};
+
 // Per-droid STANDBY signature glyphs — a dim, slow, recognizable quiet
 // variant of each droid's active glyph. This is what an idle station renders
 // (instead of the shared anonymous breathing lattice above), so a fleet of
@@ -299,19 +449,14 @@ function blastOffFrame(tMs: number): Frame {
 // active station surrounded by identical placeholders. Max intensity 2,
 // periods in the 4-6s range — deliberately calmer than any active glyph.
 export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
-  // hk-47 — document outline + stipple rows, no scanline. The stipple row
-  // count breathes on a 5s cosine (full text at t=0, bare page at rest);
-  // everything stays at intensity 1 — there is no bright sweep like active.
+  // hk-47 — the desk at rest: furniture + droid at v=1, both trays empty
+  // (tray-bottom lines only). The inbox tray-bottom is the one breathing
+  // element (1..2 on 5s) — the only sign anything might arrive.
   "hk-47": (t) => {
     const f = blank();
-    rect(f, 18, 4, 28, 24, 1);
-    const rows = [7, 10, 13, 16, 19, 22, 25];
-    const level = (Math.cos((t / 5000) * Math.PI * 2) + 1) / 2; // 0..1
-    const shown = Math.round(level * rows.length);
-    for (let i = 0; i < shown; i++) {
-      const y = rows[i];
-      if (y !== undefined) hline(f, 21, 42, y, 1);
-    }
+    drawHkFurniture(f, 1, 1);
+    hline(f, HK_INBOX_X0, HK_INBOX_X1, HK_TRAY_Y, breath(t, 5000));
+    hline(f, HK_OUTBOX_X0, HK_OUTBOX_X1, HK_TRAY_Y, 1);
     return f;
   },
 
@@ -353,13 +498,12 @@ export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
     return f;
   },
 
-  // r5 — queue slot outlines only, no packet in flight. The bottom slot
-  // (next to dispatch) breathes 1..2 on 5s as the only sign of readiness.
+  // r5 — the belt stopped, one chassis parked under the arch. The chassis
+  // outline breathes 1..2 on 5s as the only sign of readiness.
   r5: (t) => {
     const f = blank();
-    rect(f, 6, 6, 10, 6, 1);
-    rect(f, 6, 14, 10, 6, 1);
-    rect(f, 6, 22, 10, 6, breath(t, 5000));
+    drawR5Belt(f, 1, 1);
+    rect(f, 27, R5_CHASSIS_TOP, R5_CHASSIS_W, R5_CHASSIS_H, breath(t, 5000));
     return f;
   },
 
@@ -410,8 +554,10 @@ export function dmdFrame(
       return staleFrame(tMs);
     case "celebrate":
       return droid === "tt-8l" ? blastOffFrame(tMs) : celebrateFrame(tMs);
-    case "active":
-      return (activeGlyphs[droid] ?? idleFrame)(tMs);
+    case "active": {
+      const glyph = activeGlyphs[droid];
+      return glyph ? glyph(tMs, counts ?? { primary: 0, secondary: 0 }) : idleFrame(tMs);
+    }
     case "domain": {
       const glyph = domainGlyphs[droid];
       return glyph ? glyph(tMs, counts ?? { primary: 0, secondary: 0 }) : coolingFrame(droid, tMs);
