@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import {
   type CanonEnvelope,
-  type PublicEvent,
   emptyFleetState,
+  type PublicEvent,
   reduce,
   toSnapshot,
 } from "@observatory/core";
-import { AckPolicy, DeliverPolicy, connect, nkeyAuthenticator } from "nats";
+import { AckPolicy, connect, DeliverPolicy, nkeyAuthenticator } from "nats";
 import { maybeCaptureChain } from "./capture.js";
 import { readConfig } from "./config.js";
 import { EdgeWriter } from "./edge.js";

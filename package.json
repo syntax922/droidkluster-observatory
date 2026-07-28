@@ -1,7 +1,9 @@
 {
   "name": "droidkluster-observatory",
   "private": true,
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -16,7 +18,7 @@
     "test:e2e": "npm run build --workspace @observatory/core --workspace @observatory/site && npx playwright test --config packages/site/playwright.config.ts"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.9.4",
+    "@biomejs/biome": "^2.5.6",
     "@playwright/test": "^1.48.0",
     "@types/node": "^26.1.1",
     "typescript": "^5.5.4",

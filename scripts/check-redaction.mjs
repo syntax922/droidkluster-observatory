@@ -18,7 +18,7 @@
 // Runs pre-minification, directly against source, so it can't be defeated
 // by bundler string-hoisting or minifier renaming.
 
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -53,6 +53,7 @@ const hasTemplateWiring = /gh\.event\.\$\{REPLAY_REPO\}/.test(replaySource);
 if (!hasNeutralAssignment || !hasTemplateWiring) {
   failed = true;
   const expected =
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: literal placeholder text, not an interpolation.
     'expected REPLAY_REPO = "project" used as the gh.event.${REPLAY_REPO}. template prefix';
   console.error(
     `[redaction-gate] FAIL: ${relative(ROOT, REPLAY_FILE)} no longer wires the neutral "project" token into its gh.event.* subjects (${expected}).`,

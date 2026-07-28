@@ -141,10 +141,14 @@ body {
 @keyframes tl-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 2px var(--panel), 0 0 0 2px currentColor;
+    box-shadow:
+      0 0 0 2px var(--panel),
+      0 0 0 2px currentColor;
   }
   50% {
-    box-shadow: 0 0 0 2px var(--panel), 0 0 7px 3px currentColor;
+    box-shadow:
+      0 0 0 2px var(--panel),
+      0 0 7px 3px currentColor;
   }
 }
 .tl-now {
@@ -153,7 +157,9 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .tl-now {
     animation: none;
-    box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px currentColor;
+    box-shadow:
+      0 0 0 2px var(--panel),
+      0 0 0 3px currentColor;
   }
 }
 

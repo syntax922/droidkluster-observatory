@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { type CanonEnvelope, ReplayBundleSchema, emptyFleetState, reduce } from "@observatory/core";
+import { type CanonEnvelope, emptyFleetState, ReplayBundleSchema, reduce } from "@observatory/core";
 
 const MIN_EVENTS = 3;
 

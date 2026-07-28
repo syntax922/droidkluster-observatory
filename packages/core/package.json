@@ -4,6 +4,11 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "scripts": { "typecheck": "tsc --noEmit", "build": "tsc -p tsconfig.build.json" },
-  "dependencies": { "zod": "^3.23.8" }
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  }
 }
