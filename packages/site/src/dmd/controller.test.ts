@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { emptyPurview } from "../purview.js";
+import type { BoardMode } from "./controller.js";
 import { COOLING_MIN, deriveDmdState, startDmd } from "./controller.js";
 import { dmdFrame } from "./glyphs.js";
 
@@ -197,5 +198,55 @@ describe("startDmd", () => {
     // cast re-widens the type without changing runtime behavior.
     (queued as (() => void) | null)?.(); // a queued callback firing after stop must not reschedule
     expect(raf.mock.calls.length).toBe(before);
+  });
+
+  it("paintAll wires the flap board: it overlays live purview PRs, then clears when BoardMode goes idle with the same purview object still attached", () => {
+    // Reproduces the leak the reviewer flagged: a BoardView carrying stale
+    // purview data into "idle" mode must not keep the flap board paging old
+    // PR numbers under an idle glyph — the flap layer has no dimming cue of
+    // its own to signal that "idle" means "ignore this data".
+    const purviewWithPrs = {
+      ...emptyPurview(),
+      r5: { prs: [42], domainActive: false, secondary: 0 },
+    };
+    let mode: BoardMode = "live";
+    let t = 0;
+    const paint = vi.fn();
+    const root = document.createElement("div");
+    root.innerHTML = '<canvas data-dmd="r5" width="192" height="96"></canvas>';
+    let queued: (() => void) | null = null;
+    const raf = vi.fn((cb: () => void) => {
+      queued = cb;
+    });
+    startDmd({
+      root,
+      reducedMotion: false,
+      raf,
+      paint,
+      now: () => t,
+      getBoard: () => ({
+        mode,
+        droids: [{ droid: "r5", state: "idle" }],
+        celebrating: false,
+        renderedAtMs: NOW,
+        purview: purviewWithPrs,
+      }),
+    });
+
+    t = 1000;
+    (queued as (() => void) | null)?.();
+    const liveFrame = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    // deriveDmdState: no last_action_at and domainActive false -> plain "idle"
+    // glyph is the base; the flap board's "#42" page must show up on top of it.
+    expect(Array.from(liveFrame)).not.toEqual(Array.from(dmdFrame("r5", "idle", t)));
+
+    mode = "idle";
+    t = 2000;
+    (queued as (() => void) | null)?.();
+    const idleFrame = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    // Same purview object, same [42] PR still sitting in it — but BoardMode
+    // "idle" must force the flap board to clear, so the painted frame is
+    // exactly the plain idle glyph with no flap-band contribution at all.
+    expect(Array.from(idleFrame)).toEqual(Array.from(dmdFrame("r5", "idle", t)));
   });
 });

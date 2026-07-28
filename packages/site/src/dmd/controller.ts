@@ -99,7 +99,17 @@ export function startDmd(opts: StartDmdOpts): () => void {
       const state = deriveDmdState(view.mode, status, view.celebrating, view.renderedAtMs, purview);
       parts.push(`${droid}:${state}`);
       const flapBoard = boardFor(droid);
-      flapBoard.setPrs(state === "stale" || state === "celebrate" ? [] : purview.prs, t);
+      // Cleared on "stale"/"celebrate" (those states own the whole frame) AND
+      // on BoardMode "idle" — deriveDmdState never returns "domain" outside
+      // live/replay, but idle purview data can still be sitting in view.purview
+      // (e.g. a carried-forward BoardView that forgot to clear it), and the
+      // flap layer has no dimming cue of its own to signal staleness. Belt
+      // and suspenders: no BoardView-construction site should be able to leak
+      // stale flap-board PRs onto an idle glyph.
+      flapBoard.setPrs(
+        view.mode === "idle" || state === "stale" || state === "celebrate" ? [] : purview.prs,
+        t,
+      );
       const frame = dmdFrame(droid, state, t, {
         primary: purview.prs.length,
         secondary: purview.secondary,

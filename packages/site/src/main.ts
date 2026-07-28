@@ -165,7 +165,14 @@ const replay = createReplayController({
       droids: lastBoard.droids,
       celebrating: false,
       renderedAtMs: lastBoard.renderedAtMs,
-      purview: lastBoard.purview,
+      // Fresh emptyPurview(), NOT carried-forward lastBoard.purview: "idle"
+      // mode derives DmdState "idle" (not "stale"), so the flap board has no
+      // dimming cue of its own — a carried-forward purview would keep paging
+      // old PR numbers under an idle glyph, contradicting the honesty
+      // strip's idle claim. droids/renderedAtMs still carry forward because
+      // there's no fresher droid-status data to recompute from; purview has
+      // no such excuse once we know it must render as inert.
+      purview: emptyPurview(),
     };
     laneState = laneState.map((s) => ({ ...s, dimmed: true }));
   },
