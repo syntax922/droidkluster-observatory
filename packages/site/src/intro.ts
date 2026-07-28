@@ -46,7 +46,6 @@ export function initIntro(deps: IntroDeps): void {
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
 
     root.innerHTML = "";
-    root.classList.remove("intro--closing");
     root.hidden = false;
 
     const panel = document.createElement("div");
@@ -110,7 +109,6 @@ export function initIntro(deps: IntroDeps): void {
     if (mode === "boot") {
       storage.setItem(INTRO_SEEN_KEY, "1");
     }
-    root.classList.add("intro--closing");
     root.hidden = true;
     root.innerHTML = "";
     previouslyFocused?.focus();

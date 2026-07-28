@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { INTRO_SEEN_KEY, initIntro } from "./intro.js";
 
 function makeDom(): { root: HTMLElement; toggle: HTMLElement } {
