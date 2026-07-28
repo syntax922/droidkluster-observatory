@@ -4,5 +4,5 @@
   "type": "module",
   "scripts": { "typecheck": "tsc --noEmit", "build": "vite build", "dev": "vite" },
   "dependencies": { "@observatory/core": "*" },
-  "devDependencies": { "vite": "^6.0.0", "jsdom": "^25.0.0" }
+  "devDependencies": { "vite": "^8.1.5", "jsdom": "^25.0.0" }
 }
