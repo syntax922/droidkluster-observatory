@@ -24,6 +24,20 @@ test("board renders stations, chain, honesty strip from fixture data", async ({ 
   await expect(page.locator("#chains .tl-node").first()).toBeVisible();
   await expect(page.locator('canvas[data-dmd="hk-47"]')).toBeVisible();
   await expect(page.locator("#journeys .lane-map").first()).toBeVisible();
+  // copilot is retired from the station roster (UI-only removal).
+  await expect(page.locator('[data-droid="copilot"]')).toHaveCount(0);
+  // The DMD canvas actually paints something rather than sitting blank —
+  // jsdom doesn't run here, this is a real browser so getImageData reflects
+  // the real canvas painter's output.
+  const alphaSum = await page.locator('canvas[data-dmd="hk-47"]').evaluate((canvas) => {
+    const ctx = (canvas as HTMLCanvasElement).getContext("2d");
+    if (!ctx) return 0;
+    const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let sum = 0;
+    for (let i = 3; i < data.length; i += 4) sum += data[i];
+    return sum;
+  });
+  expect(alphaSum).toBeGreaterThan(0);
 });
 
 test("clicking a station opens its dossier", async ({ page }) => {

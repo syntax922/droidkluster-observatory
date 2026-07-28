@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DMD_W, blank } from "./frame.js";
-import { dmdFrame, standbyGlyphs } from "./glyphs.js";
+import { type DmdState, type GlyphCounts, dmdFrame, standbyGlyphs } from "./glyphs.js";
 
 const DROIDS = ["hk-47", "2-1b", "tt-8l", "ev-9d9", "r5", "copilot"] as const;
 
@@ -46,15 +46,6 @@ describe("active glyphs", () => {
     for (const d of DROIDS) {
       expect(dmdFrame(d, "active", 0)).not.toEqual(dmdFrame(d, "active", 700));
     }
-  });
-  it("hk-47 scanline: exactly one full-brightness row inside the document sweeps over time", () => {
-    const rowAt = (t: number) => {
-      const f = dmdFrame("hk-47", "active", t);
-      for (let y = 5; y < 27; y++) if (f[y * 64 + 24] === 3) return y;
-      return -1;
-    };
-    expect(rowAt(0)).toBeGreaterThanOrEqual(5);
-    expect(rowAt(0)).not.toBe(rowAt(1100));
   });
   it("all active glyphs stay in bounds and <= 3 across a full cycle", () => {
     for (const d of DROIDS)
@@ -105,12 +96,12 @@ describe("standby glyphs", () => {
       expect(dmdFrame("hk-47", "idle", t).includes(3)).toBe(false);
     }
   });
-  it("tt-8l standby gate is closed (bars meet at the threshold, no gap)", () => {
+  it("tt-8l standby is the shipping belt at rest (no gate bars)", () => {
     const f = dmdFrame("tt-8l", "idle", 0);
-    // Active glyph parts the bars around x=32; standby must show both bars
-    // filled right up to the threshold column with no daylight between them.
-    expect(f[16 * 64 + 27]).toBeGreaterThan(0);
-    expect(f[16 * 64 + 36]).toBeGreaterThan(0);
+    // Belt runs the full width at y=22; the old gate bars around x=27/x=36
+    // are gone.
+    expect(f[22 * 64 + 4]).toBeGreaterThan(0);
+    expect(f[22 * 64 + 59]).toBeGreaterThan(0);
   });
   it("all standby glyphs stay in bounds across a full cycle", () => {
     for (const d of DROIDS)
@@ -149,6 +140,196 @@ describe("cooling", () => {
       const f = dmdFrame(d, "cooling", 1200);
       expect(f.length).toBe(64 * 32);
       expect(f).not.toEqual(dmdFrame(d, "active", 1200));
+    }
+  });
+});
+
+describe("domain", () => {
+  it("domain without a domain glyph falls back to the cooling lift", () => {
+    const dom = dmdFrame("ev-9d9", "domain", 1234, { primary: 1, secondary: 0 });
+    const cool = dmdFrame("ev-9d9", "cooling", 1234);
+    expect(Array.from(dom)).toEqual(Array.from(cool));
+  });
+});
+
+describe("2-1b domain ECG", () => {
+  const dom = (n: number) => dmdFrame("2-1b", "domain", 400, { primary: n, secondary: 0 });
+  it("is deterministic and differs from active", () => {
+    expect(Array.from(dom(2))).toEqual(Array.from(dom(2)));
+    expect(Array.from(dom(2))).not.toEqual(Array.from(dmdFrame("2-1b", "active", 400)));
+  });
+  it("beat count scales with CI load", () => {
+    // count v>=2 pixel clusters crossing the baseline band differs between 1 and 3 PRs
+    expect(Array.from(dom(1))).not.toEqual(Array.from(dom(3)));
+  });
+  it("domain caps at intensity 3 only on <=2px tips, bulk <=2", () => {
+    const f = dom(3);
+    const bright = f.filter((v) => v === 3).length;
+    expect(bright).toBeLessThanOrEqual(12); // tips only (<=2px per beat * 6 beats cap)
+  });
+  it("beat count clamps at 6 — primary=6 and primary=10 render identically", () => {
+    expect(Array.from(dom(6))).toEqual(Array.from(dom(10)));
+  });
+});
+
+describe("tt-8l shipping department", () => {
+  it("standby has no gate bars anymore and is calm", () => {
+    const f = dmdFrame("tt-8l", "idle", 0);
+    expect(Math.max(...Array.from(f))).toBeLessThanOrEqual(2);
+  });
+  it("domain box count scales with the merge queue", () => {
+    const one = dmdFrame("tt-8l", "domain", 700, { primary: 1, secondary: 0 });
+    const three = dmdFrame("tt-8l", "domain", 700, { primary: 3, secondary: 0 });
+    expect(Array.from(one)).not.toEqual(Array.from(three));
+  });
+  it("box count clamps at 3 — primary=3 and primary=5 render identically", () => {
+    const three = dmdFrame("tt-8l", "domain", 700, { primary: 3, secondary: 0 });
+    const five = dmdFrame("tt-8l", "domain", 700, { primary: 5, secondary: 0 });
+    expect(Array.from(three)).toEqual(Array.from(five));
+  });
+  it("domain caps at intensity 3 only on <=2px accents per box (bulk <=2)", () => {
+    for (const t of [0, 400, 900, 1300, 1800, 2200, 2599]) {
+      const f = dmdFrame("tt-8l", "domain", t, { primary: 3, secondary: 0 });
+      const bright = f.filter((v) => v === 3).length;
+      expect(bright).toBeLessThanOrEqual(6); // 2px accent * 3 boxes max
+    }
+  });
+  it("celebrate is the blast-off, not the diamond rings", () => {
+    const tt = dmdFrame("tt-8l", "celebrate", 900);
+    const other = dmdFrame("hk-47", "celebrate", 900);
+    expect(Array.from(tt)).not.toEqual(Array.from(other));
+  });
+  it("blast-off is deterministic", () => {
+    expect(Array.from(dmdFrame("tt-8l", "celebrate", 1234))).toEqual(
+      Array.from(dmdFrame("tt-8l", "celebrate", 1234)),
+    );
+  });
+  it("blast-off arc is anchored to celebration-elapsed time, not the free-running clock", () => {
+    // Pin the bug: two wildly different tMs values (the free-running paint
+    // clock) must render the SAME frame when the celebration-elapsed time
+    // (the 5th arg) is the same — the arc's phase depends only on how far
+    // into the celebration we are, never on when the clock happens to read.
+    const a = dmdFrame("tt-8l", "celebrate", 900, undefined, 500);
+    const b = dmdFrame("tt-8l", "celebrate", 87_654, undefined, 500);
+    expect(Array.from(a)).toEqual(Array.from(b));
+  });
+  it("at elapsed=0 the rocket sits at pad level; by elapsed~2900 it's climbed near/off the top", () => {
+    const idx = (y: number, x: number) => y * DMD_W + x;
+    const atStart = dmdFrame("tt-8l", "celebrate", 0, undefined, 0);
+    const nearTop = dmdFrame("tt-8l", "celebrate", 0, undefined, 2900);
+    // Pad-level body top row (bodyTop=8 at riseY=0): lit at elapsed=0...
+    expect(atStart[idx(8, 48)]).toBeGreaterThan(0);
+    // ...but the climb has carried the body well clear of that row by 2900ms.
+    expect(nearTop[idx(8, 48)] ?? 0).toBe(0);
+    // And the rocket's tail is now hugging the top of the board (row 0-1),
+    // clipped by px()'s bounds check on everything above it — "near/off the
+    // top", not still mid-climb.
+    const topRows = [0, 1].some(
+      (y) => (nearTop[idx(y, 47)] ?? 0) > 0 || (nearTop[idx(y, 54)] ?? 0) > 0,
+    );
+    expect(topRows).toBe(true);
+  });
+  it("defaults to the pad frame (elapsed=0) when no elapsed is supplied — never the old modulo-of-tMs behavior", () => {
+    const noElapsedArg = dmdFrame("tt-8l", "celebrate", 87_654);
+    const explicitZero = dmdFrame("tt-8l", "celebrate", 0, undefined, 0);
+    expect(Array.from(noElapsedArg)).toEqual(Array.from(explicitZero));
+  });
+  it("all tt-8l scene states stay above the flap band (rows 0-23)", () => {
+    for (const [state, counts] of [
+      ["idle", undefined],
+      ["domain", { primary: 2, secondary: 0 }],
+      ["active", undefined],
+    ] as const) {
+      const f = dmdFrame("tt-8l", state as DmdState, 500, counts as GlyphCounts | undefined);
+      for (let y = 25; y < 32; y++) for (let x = 0; x < 64; x++) expect(f[y * 64 + x] ?? 0).toBe(0);
+    }
+  });
+});
+
+describe("hk-47 desk", () => {
+  it("inbox scales with reviews in flight, outbox with posted", () => {
+    const a = dmdFrame("hk-47", "active", 500, { primary: 1, secondary: 0 });
+    const b = dmdFrame("hk-47", "active", 500, { primary: 4, secondary: 0 });
+    const c = dmdFrame("hk-47", "active", 500, { primary: 1, secondary: 3 });
+    expect(Array.from(a)).not.toEqual(Array.from(b));
+    expect(Array.from(a)).not.toEqual(Array.from(c));
+  });
+  it("domain is dimmer than active and sheetless (static between animation ticks)", () => {
+    const d1 = dmdFrame("hk-47", "domain", 500, { primary: 2, secondary: 0 });
+    const d2 = dmdFrame("hk-47", "domain", 731, { primary: 2, secondary: 0 });
+    expect(Array.from(d1)).toEqual(Array.from(d2)); // no motion in domain
+    expect(Math.max(...Array.from(d1))).toBeLessThanOrEqual(2);
+  });
+  it("standby is calm (<=2) and deterministic", () => {
+    expect(Array.from(dmdFrame("hk-47", "idle", 100))).toEqual(
+      Array.from(dmdFrame("hk-47", "idle", 100)),
+    );
+    expect(Math.max(...Array.from(dmdFrame("hk-47", "idle", 100)))).toBeLessThanOrEqual(2);
+  });
+  it("domain inbox/outbox scale with counts (purview height)", () => {
+    const a = dmdFrame("hk-47", "domain", 500, { primary: 1, secondary: 0 });
+    const b = dmdFrame("hk-47", "domain", 500, { primary: 4, secondary: 3 });
+    expect(Array.from(a)).not.toEqual(Array.from(b));
+  });
+  it("active inbox clamps at 6 — primary=6 and primary=9 render identically", () => {
+    const six = dmdFrame("hk-47", "active", 500, { primary: 6, secondary: 0 });
+    const nine = dmdFrame("hk-47", "active", 500, { primary: 9, secondary: 0 });
+    expect(Array.from(six)).toEqual(Array.from(nine));
+  });
+  it("active outbox clamps at 6 — secondary=6 and secondary=9 render identically", () => {
+    const six = dmdFrame("hk-47", "active", 500, { primary: 0, secondary: 6 });
+    const nine = dmdFrame("hk-47", "active", 500, { primary: 0, secondary: 9 });
+    expect(Array.from(six)).toEqual(Array.from(nine));
+  });
+  it("domain inbox/outbox clamp at 6 — 6 and 9 render identically", () => {
+    const six = dmdFrame("hk-47", "domain", 500, { primary: 6, secondary: 6 });
+    const nine = dmdFrame("hk-47", "domain", 500, { primary: 9, secondary: 9 });
+    expect(Array.from(six)).toEqual(Array.from(nine));
+  });
+});
+
+describe("r5 weld line", () => {
+  it("active sparks exist under the arch at some phase", () => {
+    // scan a full cycle: at least one tMs shows v=3 pixels in the arch region
+    let sparked = false;
+    for (let t = 0; t < 3000; t += 70) {
+      const f = dmdFrame("r5", "active", t, { primary: 0, secondary: 2 });
+      for (let y = 4; y < 16 && !sparked; y++)
+        for (let x = 26; x < 38; x++)
+          if (f[y * 64 + x] === 3) {
+            sparked = true;
+            break;
+          }
+      if (sparked) break;
+    }
+    expect(sparked).toBe(true);
+  });
+  it("domain chassis count scales with in-flight dispatches", () => {
+    const one = dmdFrame("r5", "domain", 900, { primary: 0, secondary: 1 });
+    const four = dmdFrame("r5", "domain", 900, { primary: 0, secondary: 4 });
+    expect(Array.from(one)).not.toEqual(Array.from(four));
+  });
+  it("both families stay above the flap band", () => {
+    for (const droid of ["hk-47", "r5"] as const) {
+      const f = dmdFrame(droid, "active", 640, { primary: 2, secondary: 2 });
+      for (let y = 25; y < 32; y++) for (let x = 0; x < 64; x++) expect(f[y * 64 + x] ?? 0).toBe(0);
+    }
+  });
+  it("active chassis count clamps at 4 — secondary=4 and secondary=9 render identically", () => {
+    const four = dmdFrame("r5", "active", 900, { primary: 0, secondary: 4 });
+    const nine = dmdFrame("r5", "active", 900, { primary: 0, secondary: 9 });
+    expect(Array.from(four)).toEqual(Array.from(nine));
+  });
+  it("domain chassis count clamps at 4 — secondary=4 and secondary=9 render identically", () => {
+    const four = dmdFrame("r5", "domain", 900, { primary: 0, secondary: 4 });
+    const nine = dmdFrame("r5", "domain", 900, { primary: 0, secondary: 9 });
+    expect(Array.from(four)).toEqual(Array.from(nine));
+  });
+  it("domain sparks stay within the <=2px v=3 tip cap across a full cycle", () => {
+    for (let t = 0; t < 3000; t += 70) {
+      const f = dmdFrame("r5", "domain", t, { primary: 0, secondary: 4 });
+      const bright = f.filter((v) => v === 3).length;
+      expect(bright).toBeLessThanOrEqual(2);
     }
   });
 });

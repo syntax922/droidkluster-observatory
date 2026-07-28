@@ -1,8 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
+import { emptyPurview } from "../purview.js";
+import type { BoardMode, BoardView } from "./controller.js";
 import { COOLING_MIN, deriveDmdState, startDmd } from "./controller.js";
 import { dmdFrame } from "./glyphs.js";
 
 const NOW = Date.parse("2026-07-27T12:00:00Z");
+
+const P0 = { prs: [], domainActive: false, secondary: 0 };
+const PD = { prs: [7, 8], domainActive: true, secondary: 0 };
 
 describe("deriveDmdState", () => {
   const idle = { droid: "r5", state: "idle" } as const;
@@ -13,30 +18,30 @@ describe("deriveDmdState", () => {
     last_action_at: new Date(NOW - 2 * 60_000).toISOString(),
   } as const;
   it("stale mode overrides everything, including an active droid", () => {
-    expect(deriveDmdState("stale", active, false, NOW)).toBe("stale");
+    expect(deriveDmdState("stale", active, false, NOW, P0)).toBe("stale");
   });
   it("celebrating overrides active/idle in live mode", () => {
-    expect(deriveDmdState("live", idle, true, NOW)).toBe("celebrate");
+    expect(deriveDmdState("live", idle, true, NOW, P0)).toBe("celebrate");
   });
   it("active droid in live mode animates its glyph, overriding cooling", () => {
     const activeButRecent = { ...active, last_action_at: new Date(NOW - 60_000).toISOString() };
-    expect(deriveDmdState("live", activeButRecent, false, NOW)).toBe("active");
+    expect(deriveDmdState("live", activeButRecent, false, NOW, P0)).toBe("active");
   });
   it("replay mode renders the replayed droid states, not stale", () => {
-    expect(deriveDmdState("replay", active, false, NOW)).toBe("active");
+    expect(deriveDmdState("replay", active, false, NOW, P0)).toBe("active");
   });
   it("recently-acted idle droid cools in live mode", () => {
-    expect(deriveDmdState("live", recentlyIdle, false, NOW)).toBe("cooling");
+    expect(deriveDmdState("live", recentlyIdle, false, NOW, P0)).toBe("cooling");
   });
   it("recently-acted idle droid cools in replay mode against the replayed clock", () => {
-    expect(deriveDmdState("replay", recentlyIdle, false, NOW)).toBe("cooling");
+    expect(deriveDmdState("replay", recentlyIdle, false, NOW, P0)).toBe("cooling");
   });
   it("idle droid with no last_action_at is plain idle, not cooling", () => {
-    expect(deriveDmdState("live", idle, false, NOW)).toBe("idle");
+    expect(deriveDmdState("live", idle, false, NOW, P0)).toBe("idle");
   });
   it("cooling does not apply in stale or idle board modes", () => {
-    expect(deriveDmdState("stale", recentlyIdle, false, NOW)).toBe("stale");
-    expect(deriveDmdState("idle", recentlyIdle, false, NOW)).toBe("idle");
+    expect(deriveDmdState("stale", recentlyIdle, false, NOW, P0)).toBe("stale");
+    expect(deriveDmdState("idle", recentlyIdle, false, NOW, P0)).toBe("idle");
   });
   it(`falls back to idle exactly at the ${COOLING_MIN}-minute boundary and past it`, () => {
     const atBoundary = {
@@ -54,9 +59,42 @@ describe("deriveDmdState", () => {
       state: "idle",
       last_action_at: new Date(NOW - (COOLING_MIN * 60_000 - 1000)).toISOString(),
     } as const;
-    expect(deriveDmdState("live", atBoundary, false, NOW)).toBe("cooling"); // inclusive
-    expect(deriveDmdState("live", justPast, false, NOW)).toBe("idle");
-    expect(deriveDmdState("live", justUnder, false, NOW)).toBe("cooling");
+    expect(deriveDmdState("live", atBoundary, false, NOW, P0)).toBe("cooling"); // inclusive
+    expect(deriveDmdState("live", justPast, false, NOW, P0)).toBe("idle");
+    expect(deriveDmdState("live", justUnder, false, NOW, P0)).toBe("cooling");
+  });
+  it("domain outranks cooling but not active", () => {
+    const recent = new Date(NOW - 60_000).toISOString();
+    expect(
+      deriveDmdState(
+        "live",
+        { droid: "2-1b", state: "idle", last_action_at: recent },
+        false,
+        NOW,
+        PD,
+      ),
+    ).toBe("domain");
+    expect(deriveDmdState("live", { droid: "2-1b", state: "active" }, false, NOW, PD)).toBe(
+      "active",
+    );
+  });
+  it("stale and celebrate outrank domain", () => {
+    expect(deriveDmdState("stale", { droid: "2-1b", state: "idle" }, false, NOW, PD)).toBe("stale");
+    expect(deriveDmdState("live", { droid: "2-1b", state: "idle" }, true, NOW, PD)).toBe(
+      "celebrate",
+    );
+  });
+  it("no purview -> cooling/idle unchanged", () => {
+    const recent = new Date(NOW - 60_000).toISOString();
+    expect(
+      deriveDmdState(
+        "live",
+        { droid: "2-1b", state: "idle", last_action_at: recent },
+        false,
+        NOW,
+        P0,
+      ),
+    ).toBe("cooling");
   });
 });
 
@@ -88,6 +126,7 @@ describe("startDmd", () => {
         droids: [{ droid: "r5", state: "idle" }],
         celebrating: false,
         renderedAtMs: NOW,
+        purview: emptyPurview(),
       }),
     });
     expect(raf).not.toHaveBeenCalled();
@@ -109,6 +148,7 @@ describe("startDmd", () => {
           droids: [{ droid: "r5", state: "idle" }],
           celebrating: false,
           renderedAtMs: NOW,
+          purview: emptyPurview(),
         }),
       });
       // Immediate paint pass at start.
@@ -147,6 +187,7 @@ describe("startDmd", () => {
         droids: [{ droid: "hk-47", state: "active", task: "reviewing PR #1" }],
         celebrating: false,
         renderedAtMs: NOW,
+        purview: emptyPurview(),
       }),
     });
     expect(raf).toHaveBeenCalledTimes(1);
@@ -157,5 +198,115 @@ describe("startDmd", () => {
     // cast re-widens the type without changing runtime behavior.
     (queued as (() => void) | null)?.(); // a queued callback firing after stop must not reschedule
     expect(raf.mock.calls.length).toBe(before);
+  });
+
+  it("paintAll wires the flap board: it overlays live purview PRs, then clears when BoardMode goes idle with the same purview object still attached", () => {
+    // Reproduces the leak the reviewer flagged: a BoardView carrying stale
+    // purview data into "idle" mode must not keep the flap board paging old
+    // PR numbers under an idle glyph — the flap layer has no dimming cue of
+    // its own to signal that "idle" means "ignore this data".
+    const purviewWithPrs = {
+      ...emptyPurview(),
+      r5: { prs: [42], domainActive: false, secondary: 0 },
+    };
+    let mode: BoardMode = "live";
+    let t = 0;
+    const paint = vi.fn();
+    const root = document.createElement("div");
+    root.innerHTML = '<canvas data-dmd="r5" width="192" height="96"></canvas>';
+    let queued: (() => void) | null = null;
+    const raf = vi.fn((cb: () => void) => {
+      queued = cb;
+    });
+    startDmd({
+      root,
+      reducedMotion: false,
+      raf,
+      paint,
+      now: () => t,
+      getBoard: () => ({
+        mode,
+        droids: [{ droid: "r5", state: "idle" }],
+        celebrating: false,
+        renderedAtMs: NOW,
+        purview: purviewWithPrs,
+      }),
+    });
+
+    t = 1000;
+    (queued as (() => void) | null)?.();
+    const liveFrame = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    // deriveDmdState: no last_action_at and domainActive false -> plain "idle"
+    // glyph is the base; the flap board's "#42" page must show up on top of it.
+    expect(Array.from(liveFrame)).not.toEqual(Array.from(dmdFrame("r5", "idle", t)));
+
+    mode = "idle";
+    t = 2000;
+    (queued as (() => void) | null)?.();
+    const idleFrame = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    // Same purview object, same [42] PR still sitting in it — but BoardMode
+    // "idle" must force the flap board to clear, so the painted frame is
+    // exactly the plain idle glyph with no flap-band contribution at all.
+    expect(Array.from(idleFrame)).toEqual(Array.from(dmdFrame("r5", "idle", t)));
+  });
+
+  it("tt-8l blast-off: anchors to celebration start (not the free-running clock) and climbs continuously across ticks on an unchanged view", () => {
+    // Reproduces the reported bug directly: t starts at a large, arbitrary
+    // value (standing in for "the app has been running a while") to prove
+    // the arc's phase is NOT derived from tMs % 3000.
+    let t = 87_654;
+    const paint = vi.fn();
+    const root = document.createElement("div");
+    root.innerHTML = '<canvas data-dmd="tt-8l" width="192" height="96"></canvas>';
+    let queued: (() => void) | null = null;
+    const raf = vi.fn((cb: () => void) => {
+      queued = cb;
+    });
+    let view: BoardView = {
+      mode: "live",
+      droids: [{ droid: "tt-8l", state: "idle" }],
+      celebrating: false,
+      celebrateElapsedAtRenderMs: null,
+      renderedAtMs: NOW,
+      purview: emptyPurview(),
+    };
+    startDmd({
+      root,
+      reducedMotion: false,
+      raf,
+      paint,
+      now: () => t,
+      getBoard: () => view,
+    });
+
+    // A new merge lands: main.ts constructs a fresh BoardView (new object
+    // identity) with celebrating=true and elapsedAtRender≈0.
+    view = { ...view, celebrating: true, celebrateElapsedAtRenderMs: 0 };
+    (queued as (() => void) | null)?.();
+    const atStart = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    // Pad-level body top row is lit at the celebration's very start.
+    expect(atStart[8 * 64 + 48]).toBeGreaterThan(0);
+
+    // 2900ms later, the SAME view object is still current (no fresher poll
+    // has landed — polls are ~20s apart, celebrations are 3s) but paint
+    // ticks keep firing. The arc must have kept climbing using the paint
+    // clock's own delta, not frozen and not re-derived from t's raw value.
+    t = 87_654 + 2900;
+    (queued as (() => void) | null)?.();
+    const nearTop = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    expect(nearTop[8 * 64 + 48] ?? 0).toBe(0); // climbed clear of the pad row
+    expect(Array.from(nearTop)).toEqual(
+      Array.from(dmdFrame("tt-8l", "celebrate", t, undefined, 2900)),
+    );
+
+    // The celebration ends, then a SECOND one starts later at yet another
+    // large, arbitrary t. It must restart at the pad (elapsed 0) rather than
+    // resuming wherever tMs % 3000 happens to land — this is the exact
+    // "vanish, reappear on the pad, relaunch mid-celebration" bug.
+    view = { ...view, celebrating: true, celebrateElapsedAtRenderMs: 0 };
+    t += 100_000;
+    (queued as (() => void) | null)?.();
+    const secondStart = paint.mock.calls.at(-1)?.[1] as Uint8Array;
+    expect(secondStart[8 * 64 + 48]).toBeGreaterThan(0); // back at the pad, not mid-climb
   });
 });

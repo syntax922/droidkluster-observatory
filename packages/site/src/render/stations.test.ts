@@ -49,4 +49,18 @@ describe("renderStations", () => {
     expect(r5?.textContent).toContain("Dispatch & rework routing");
     expect(r5?.textContent).toContain("DISPATCHING ISSUE #128");
   });
+
+  it("copilot is not rendered as a station (UI-only removal)", () => {
+    const el = document.createElement("div");
+    renderStations(
+      el,
+      [
+        { droid: "hk-47", state: "idle" },
+        { droid: "copilot", state: "idle" },
+      ],
+      NOW,
+    );
+    expect(el.querySelectorAll(".station")).toHaveLength(1);
+    expect(el.querySelector('[data-droid="copilot"]')).toBeNull();
+  });
 });
