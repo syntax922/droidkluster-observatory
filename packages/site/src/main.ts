@@ -168,7 +168,7 @@ const replay = createReplayController({
 
 // Deploy stamp: inspectable in devtools, and guarantees each deploy re-hashes
 // the bundle past any edge-cached artifact of the previous one.
-document.documentElement.dataset.build = "2026-07-27";
+document.documentElement.dataset.build = "2026-07-28";
 
 initIntro({
   root: els.intro,
