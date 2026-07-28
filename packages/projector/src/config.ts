@@ -10,6 +10,8 @@ export interface ProjectorConfig {
   debounceMs: number;
   heartbeatMs: number;
   ignorePrs: ReadonlySet<number>;
+  sourceRepo: string;
+  redactTerms: readonly string[];
 }
 
 function req(env: Record<string, string | undefined>, name: string): string {
@@ -20,6 +22,19 @@ function req(env: Record<string, string | undefined>, name: string): string {
 
 function csv(env: Record<string, string | undefined>, name: string): string[] {
   return req(env, name)
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/**
+ * Optional CSV env var, e.g. `OBSERVATORY_REDACT_TERMS`. Unlike csv() above,
+ * an unset var is not an error — it just yields no redaction terms.
+ */
+function csvOpt(env: Record<string, string | undefined>, name: string): string[] {
+  const raw = env[name];
+  if (raw === undefined) return [];
+  return raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
@@ -89,5 +104,7 @@ export function readConfig(env: Record<string, string | undefined>): ProjectorCo
     debounceMs: numEnv(env, "PUSH_DEBOUNCE_MS", 10000),
     heartbeatMs: numEnv(env, "PUSH_HEARTBEAT_MS", 60000),
     ignorePrs: intSetEnv(env, "OBSERVATORY_IGNORE_PRS", [99999]),
+    sourceRepo: req(env, "OBSERVATORY_SOURCE_REPO"),
+    redactTerms: csvOpt(env, "OBSERVATORY_REDACT_TERMS"),
   };
 }

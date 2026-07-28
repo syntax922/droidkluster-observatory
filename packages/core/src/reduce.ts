@@ -60,12 +60,17 @@ interface Classified {
   reopen?: boolean;
 }
 
-function classify(subject: string, payload: unknown): Classified | null {
+function classify(
+  subject: string,
+  payload: unknown,
+  repo: string,
+  redactTerms: readonly string[],
+): Classified | null {
   const p = obj(payload) ?? {};
   const tokens = subject.split(".");
 
-  // merge-decider family: dungeonadventures.event.merge_decision.reached.<pr>
-  if (subject.startsWith("dungeonadventures.event.merge_decision.reached.")) {
+  // merge-decider family: <repo>.event.merge_decision.reached.<pr>
+  if (subject.startsWith(`${repo}.event.merge_decision.reached.`)) {
     const pr = num(p.pr_number) ?? num(Number(tokens[tokens.length - 1]));
     const rawVerdict = (str(p.verdict) ?? "DECIDED").toUpperCase();
     const verdict = ["APPROVED", "REJECTED", "DEFERRED", "DECIDED"].includes(rawVerdict)
@@ -82,6 +87,7 @@ function classify(subject: string, payload: unknown): Classified | null {
   }
 
   // coder-completed family: droidkluster.event.coder.completed.<id>
+  // (brand — unchanged; droidkluster is the public brand, not the private repo token)
   if (subject.startsWith("droidkluster.event.coder.completed.")) {
     const kindField = str(p.kind);
     const pr = num(p.pr_number);
@@ -111,8 +117,8 @@ function classify(subject: string, payload: unknown): Classified | null {
     };
   }
 
-  // canon gh family: gh.event.dungeonadventures.<entity>.<verb>.<idtail>
-  if (!subject.startsWith("gh.event.dungeonadventures.") || tokens.length < 6) return null;
+  // canon gh family: gh.event.<repo>.<entity>.<verb>.<idtail>
+  if (!subject.startsWith(`gh.event.${repo}.`) || tokens.length < 6) return null;
   const entity = tokens[3];
   const verb = tokens[4];
 
@@ -191,7 +197,7 @@ function classify(subject: string, payload: unknown): Classified | null {
       droid: "hk-47",
       pr,
       summary: `review ${verdict} · PR #${pr}`,
-      ...(body ? { excerpt: scrubExcerpt(body) } : {}),
+      ...(body ? { excerpt: scrubExcerpt(body, redactTerms) } : {}),
       idle: { droid: "hk-47", last_action: `posted ${verdict} on PR #${pr}` },
     };
   }
@@ -199,7 +205,7 @@ function classify(subject: string, payload: unknown): Classified | null {
   if (entity === "check_run" && verb === "completed") {
     const cr = obj(p.check_run);
     const pr = num(obj((cr?.pull_requests as unknown[] | undefined)?.[0])?.number);
-    const name = scrubExcerpt(str(cr?.name) ?? "check").slice(0, 40);
+    const name = scrubExcerpt(str(cr?.name) ?? "check", redactTerms).slice(0, 40);
     const conclusion = str(cr?.conclusion) ?? "unknown";
     if (!pr) return null;
     if (conclusion === "failure") {
@@ -245,14 +251,20 @@ function classify(subject: string, payload: unknown): Classified | null {
   return null;
 }
 
+export interface ReduceOpts {
+  repo: string;
+  ignorePrs?: ReadonlySet<number>;
+  redactTerms?: readonly string[];
+}
+
 export function reduce(
   state: FleetState,
   env: CanonEnvelope,
-  opts?: { ignorePrs?: ReadonlySet<number> },
+  opts: ReduceOpts,
 ): { state: FleetState; emitted: PublicEvent[] } {
-  const c = classify(env.subject, env.payload);
+  const c = classify(env.subject, env.payload, opts.repo, opts.redactTerms ?? []);
   if (!c) return { state, emitted: [] };
-  if (c.pr !== undefined && opts?.ignorePrs?.has(c.pr)) return { state, emitted: [] };
+  if (c.pr !== undefined && opts.ignorePrs?.has(c.pr)) return { state, emitted: [] };
   const at = env.ts ?? new Date(0).toISOString();
 
   const event: PublicEvent = {

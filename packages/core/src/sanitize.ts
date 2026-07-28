@@ -1,5 +1,6 @@
 export const EXCERPT_MAX_LEN = 600;
 const REDACTED = "[redacted]";
+const PROJECT_TOKEN = "[project]";
 const PRE_CAP = 4000;
 
 // Order matters: (1) URL/hostname rules run before bare-IP so host:port inside
@@ -35,7 +36,11 @@ const KILL_RULES: Array<{ name: string; re: RegExp }> = [
   { name: "email", re: /\b[\w.+-]+@[\w-]+(\.[\w-]+)+\b/g },
 ];
 
-export function scrubExcerpt(text: string): string {
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function scrubExcerpt(text: string, redactTerms: readonly string[] = []): string {
   let out = text.slice(0, PRE_CAP);
   // Internal plumbing prefixes (hs:command_id) — strip whole comments, not worth a redaction marker.
   out = out.replace(/<!--[\s\S]*?-->/g, "");
@@ -45,6 +50,13 @@ export function scrubExcerpt(text: string): string {
       const lead = /^[\s('"`]/.exec(match)?.[0] ?? "";
       return `${lead}${REDACTED}`;
     });
+  }
+  // Env-fed private-name redaction: literal fixed strings only (escaped, so
+  // linear like the kill rules under PRE_CAP). Values come from private
+  // config (OBSERVATORY_REDACT_TERMS) — never hardcode a real name here.
+  for (const term of redactTerms) {
+    if (term.length === 0) continue;
+    out = out.replace(new RegExp(escapeRegExp(term), "gi"), PROJECT_TOKEN);
   }
   out = out.replace(/\s{2,}/g, " ").trim();
   if (out.length > EXCERPT_MAX_LEN) {

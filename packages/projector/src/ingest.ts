@@ -14,12 +14,17 @@ const MIN_EVENTS = 3;
 // bundles even when ingest.js is run standalone without that env var.
 const DEFAULT_IGNORE_PRS: ReadonlySet<number> = new Set([99999]);
 
-export function ingest(
-  inputPath: string,
-  outDir: string,
-  opts?: { ignorePrs?: ReadonlySet<number> },
-): string[] {
-  const ignorePrs = opts?.ignorePrs ?? DEFAULT_IGNORE_PRS;
+// Mirrors reduce()'s ReduceOpts — repo is required (no safe default: unlike
+// ignorePrs, a wrong fallback here would silently no-op every real
+// recording rather than fail loudly), ignorePrs/redactTerms stay optional.
+export interface IngestOpts {
+  repo: string;
+  ignorePrs?: ReadonlySet<number>;
+  redactTerms?: readonly string[];
+}
+
+export function ingest(inputPath: string, outDir: string, opts: IngestOpts): string[] {
+  const ignorePrs = opts.ignorePrs ?? DEFAULT_IGNORE_PRS;
   const state = emptyFleetState();
   for (const line of readFileSync(inputPath, "utf8").split("\n")) {
     if (!line.trim()) continue;
@@ -36,7 +41,11 @@ export function ingest(
           ...(typeof raw.ts === "string" ? { ts: raw.ts } : {}),
           payload: raw.payload,
         },
-        { ignorePrs },
+        {
+          repo: opts.repo,
+          ignorePrs,
+          ...(opts.redactTerms ? { redactTerms: opts.redactTerms } : {}),
+        },
       );
     } catch {
       // Malformed recorder line: skip; the recording is best-effort.
@@ -70,6 +79,18 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.error("usage: ingest.js --input <recording.jsonl> --out <dir>");
     process.exit(2);
   }
-  const files = ingest(values.input, values.out);
+  // Same env var the live projector reads via readConfig() (config.ts) —
+  // ingest.js runs standalone (no NATS_*/R2_* required), so it reads this
+  // one var directly rather than pulling in the full projector config.
+  const repo = process.env.OBSERVATORY_SOURCE_REPO;
+  if (!repo) {
+    console.error("required env var OBSERVATORY_SOURCE_REPO not set");
+    process.exit(2);
+  }
+  const redactTerms = (process.env.OBSERVATORY_REDACT_TERMS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const files = ingest(values.input, values.out, { repo, redactTerms });
   console.log(`wrote ${files.length} bundle(s): ${files.join(", ")}`);
 }
