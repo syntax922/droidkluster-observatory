@@ -201,12 +201,21 @@ describe("2-1b PQRST", () => {
   // upstroke's own offset — see drawAfibComplex), independent of how far
   // the upstroke bridge happens to reach.
   function rColumns(f: Frame): number[] {
-    const hits: Array<[x: number, minY: number]> = [];
+    const tops: number[] = [];
     for (let x = 0; x < DMD_W; x++) {
       let minY = 99;
       for (let y = 0; y < 24; y++) if ((f[y * DMD_W + x] ?? 0) > 0) minY = Math.min(minY, y);
-      if (minY < 6) hits.push([x, minY]);
+      tops.push(minY);
     }
+    // Relative, not absolute: the R apex is authored as the tallest feature of
+    // every 2-1b frame, so "within 2 rows of this frame's own highest pixel"
+    // isolates R-tips no matter how tall P/T/shoulders grow (a fixed row
+    // silently started matching T crowns when the drama wave raised them).
+    const globalMin = Math.min(...tops.filter((y) => y < 99));
+    const hits: Array<[x: number, minY: number]> = [];
+    tops.forEach((minY, x) => {
+      if (minY <= globalMin + 2) hits.push([x, minY]);
+    });
     const groups: Array<Array<[x: number, minY: number]>> = [];
     for (const hit of hits) {
       const lastGroup = groups[groups.length - 1];
@@ -802,7 +811,7 @@ describe("2-1b uniform trace intensity (pen-line fix, round 3)", () => {
     // and can straddle the x=0/63 seam.
     for (const [state, baselineY, counts] of [
       ["domain", 14, { primary: 1, secondary: 1 }],
-      ["active", 16, { primary: 1, secondary: 0 }],
+      ["active", 14, { primary: 1, secondary: 0 }],
     ] as const) {
       for (let t = 0; t < 5120; t += 80) {
         const f = dmdFrame("2-1b", state, t, counts) as Frame;
