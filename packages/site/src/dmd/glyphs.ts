@@ -226,9 +226,18 @@ activeGlyphs["hk-47"] = (t, counts) => {
 // was too cramped to read. This redesign widens P to a genuine 5-column
 // rounded hump, T to an 8-column broad rounded arc (the widest wave in the
 // complex, per the reference), and narrows/heightens the QRS so R is
-// unambiguously the towering feature (10px tall vs P's 2px and T's 3px —
+// unambiguously the towering feature (13px tall vs P's 5px and T's 7px —
 // several times either). See each segment's own comment below for exact
 // proportions.
+//
+// Amplitude wave (2026-07-28): the morphology pass above got the SHAPE
+// right but was still too shallow to read as a clear image on the actual
+// board — R's 10px apex left headroom above it unused, and the Q/S
+// undershoot wasn't pronounced against the baseline. This pass rescales
+// every segment's height (domain baseline also drops 12->14 to buy more
+// headroom on both sides — see domainGlyphs["2-1b"]) while keeping every
+// dx position, the P/T rounded-arc shape, and the pen-line/bridging
+// contracts exactly as they were: only the dy magnitudes changed.
 // Shared point-plotter for both PQRST families (drawPqrst, drawAfibComplex):
 // draws each sample point via px(), and — when `bridge` is set — connects it
 // to the PREVIOUS point with plotLine at `bridgeV` first, so a steep run
@@ -303,17 +312,22 @@ function drawPqrst(
   const { v, tipV } = opts;
   const put = tracePointPlotter(f, xOrigin, baselineY, v);
   // P wave: a small ROUNDED hump, 5 columns wide (dx 0-4), symmetric
-  // rise-then-fall of 2 rows, starting and ending exactly on the baseline so
-  // no chain-dead-end anchor is needed at either end (both endpoints sit at
+  // rise-then-fall of 5 rows (amplitude wave, 2026-07-28: was 2 rows —
+  // scaled up along with the rest of the complex, still clearly subordinate
+  // to R's 13-row spike), starting and ending exactly on the baseline so no
+  // chain-dead-end anchor is needed at either end (both endpoints sit at
   // dy=0 — always Chebyshev-adjacent to the baseline hline regardless of
   // whether their own bridge survives a wrap-seam skip). The peak (dx=2,
-  // baseline-2) is also the sinus/AFib discriminator used by the test
+  // baseline-5) is also the sinus/AFib discriminator used by the test
   // suite — AFib's fibrillatory jitter is contractually only ±1px, so it
-  // can never land here.
+  // can never land here. The rise/fall passes through row baseline-2 (the
+  // discriminator's own scan row) on both flanks, so the widened hump keeps
+  // firing the same window it always did — see pRegionLit in the test
+  // suite.
   //
   // NOTE for the discriminator window: the test suite's rColumns() scans
   // for the topmost lit row per column and thresholds at y<6 to isolate the
-  // R-spike. The R upstroke->tip bridge (dx 8->9, a steep 5-row climb in one
+  // R-spike. The R upstroke->tip bridge (dx 8->9, a steep climb in one
   // x-step) is steep enough that it ALSO dips below that threshold at dx=8
   // (one column left of the tip's own dx=9-10) — verified empirically.
   // Fix round 1 (hardening, 2026-07-28): rColumns() now groups adjacent
@@ -329,37 +343,48 @@ function drawPqrst(
   // baseline-2 crossing, at relative offset -1 from the apex column — the
   // artifact this note is warning about — to prove the window excludes it).
   put(0, 0, v);
-  put(1, -1, v, true);
-  put(2, -2, v, true); // P peak
-  put(3, -1, v, true);
+  put(1, -3, v, true);
+  put(2, -5, v, true); // P peak
+  put(3, -3, v, true);
   put(4, 0, v, true);
   // dx 5-6: flat PR segment (baseline hline covers it) — intentionally NOT
   // bridged from the P wave into Q, so the isoelectric segment stays flat.
-  put(7, 1, v); // Q dip
+  put(7, 2, v); // Q dip
+  // Q's own forward edge (into the R upstroke, next) is a normal bridge, but
+  // that bridge is skipped at the rare wrap-seam straddle (tracePointPlotter's
+  // monotonic-x guard) — and unlike the pre-amplitude-wave Q (dy=1, always
+  // Chebyshev-1 from the baseline hline for free), Q now sits 2 rows below
+  // baseline (amplitude wave, 2026-07-28), too far to fall back on hline
+  // adjacency alone. A direct one-row connector closes that gap
+  // unconditionally (harmless overlap with the normal bridge otherwise —
+  // px() is max-blend), keeping Q chain-connected in every case, seam or not.
+  px(f, wrapX(xOrigin + 7), baselineY + 1, v);
   // R spike: narrow and TOWERING — the dominant vertical feature by a wide
-  // margin over both P (2 rows) and T (3 rows). Upstroke/downstroke at bulk
-  // v, bridged; the apex (dx 9-10, 2px wide) is the tip accent, 10px above
-  // baseline — reaches y≈2 off a y=12 domain baseline and y≈6 off a y=16
-  // standby baseline, matching the contract range for both — bridged in but
+  // margin over both P (5 rows) and T (7 rows). Upstroke/downstroke at bulk
+  // v, bridged; the apex (dx 9-10, 2px wide) is the tip accent, 13px above
+  // baseline (amplitude wave, 2026-07-28: was 10px) — reaches y≈1 off a
+  // y=14 domain baseline and y≈3 off a y=16 standby baseline, near-touching
+  // the top of the scene band (rows 0-23) at domain — bridged in but
   // written at tipV so it wins the max-blend over the bridge's own bulk-v
   // pass through that same pixel.
-  put(8, -5, v, true); // R upstroke
-  put(9, -10, tipV, true); // R tip
-  put(10, -10, tipV, true); // R tip (2nd px)
-  put(11, 5, v, true, true); // S: sharp undershoot below baseline — chain dead end (ST gap unbridged forward), 5px from baseline so it needs the anchor.
+  put(8, -7, v, true); // R upstroke
+  put(9, -13, tipV, true); // R tip
+  put(10, -13, tipV, true); // R tip (2nd px)
+  put(11, 6, v, true, true); // S: sharp undershoot below baseline — chain dead end (ST gap unbridged forward), 6px from baseline (amplitude wave: was 5) so it needs the anchor.
   // dx 12-13: flat ST segment (baseline hline covers it) — intentionally NOT
   // bridged from S into T, matching the PR segment's flat treatment.
   // T wave: the WIDEST wave in the complex — 8 columns (dx 14-21), a smooth
-  // rounded arc rising 3 rows with a 2-column flat top (dx 17-18) for a
-  // genuinely rounded (not peaked) hump, matching the textbook reference.
-  // Like the P wave, both endpoints sit at dy=0 so no anchor is needed.
+  // rounded arc rising 7 rows (amplitude wave: was 3) with a 2-column flat
+  // top (dx 17-18) for a genuinely rounded (not peaked) hump, matching the
+  // textbook reference. Like the P wave, both endpoints sit at dy=0 so no
+  // anchor is needed.
   put(14, 0, v);
-  put(15, -1, v, true);
-  put(16, -2, v, true);
-  put(17, -3, v, true); // T peak (sustained across dx 17-18)
-  put(18, -3, v, true);
-  put(19, -2, v, true);
-  put(20, -1, v, true);
+  put(15, -2, v, true);
+  put(16, -5, v, true);
+  put(17, -7, v, true); // T peak (sustained across dx 17-18)
+  put(18, -7, v, true);
+  put(19, -5, v, true);
+  put(20, -2, v, true);
   put(21, 0, v, true);
 }
 
@@ -409,22 +434,28 @@ function drawAfibWavelets(f: Frame, baselineY: number, tMs: number, v: number): 
 // (x, x+1) at `tipV`, matching the same accent budget as the sinus R-tip.
 //
 // Morphology wave (2026-07-28): raised the base height (9->11, so AFib's R
-// reads at least as tall as sinus's 10px R) and deepened S into a REAL
+// reads at least as tall as sinus's R) and deepened S into a REAL
 // undershoot (was +2, now +6) so AFib's own QRS is legible on its own
 // merits — not just "irregular", but visibly a well-formed-if-chaotic spike
 // train, contrasting against sinus's rounded P/T rather than looking like a
 // degenerate scribble next to it.
 //
 // Fix round 1, P1 (2026-07-28): the height budget used to be a flat
-// clamp(.., 8, 14) regardless of baseline. At the domain baseline (y=12), a
-// jittered h of 13-14 sends the tip to y<=-1 — px()'s bounds check silently
-// no-ops it, so the beat rendered flat-topped with ZERO v=3 pixels (a
-// reviewer sweep found this in ~10.5% of frames at primary=1). The active
-// baseline (y=16) had enough headroom (min tip y=2) to never trigger it.
-// Fix: cap h so the tip never goes above row 1 (`baselineY - 1`), which
-// COMPRESSES the jitter range at low baselines (domain: h ∈ [8,11], since
-// min(14, 12-1)=11) rather than deleting the variation outright — active
-// keeps its full [8,14] range unchanged (min(14, 16-1)=14).
+// clamp(.., 8, 14) regardless of baseline. At the (then) domain baseline
+// (y=12), a jittered h of 13-14 sends the tip to y<=-1 — px()'s bounds
+// check silently no-ops it, so the beat rendered flat-topped with ZERO v=3
+// pixels (a reviewer sweep found this in ~10.5% of frames at primary=1).
+// The active baseline (y=16) had enough headroom (min tip y=2) to never
+// trigger it. Fix: cap h so the tip never goes above row 1
+// (`baselineY - 1`), which COMPRESSES the jitter range at low baselines
+// rather than deleting the variation outright.
+//
+// Amplitude wave (2026-07-28): the domain baseline dropped 12->14 (see
+// domainGlyphs["2-1b"]), which raises this clamp's ceiling for free — domain
+// now reaches h ∈ [9,13] (min(14, 14-1)=13, so the tip can reach row 1, near
+// the top of the scene band, matching sinus's own R apex) instead of the old
+// [9,11]. Active is unaffected (min(14, 16-1)=14, already at its ceiling
+// before this wave).
 function drawAfibComplex(
   f: Frame,
   x: number,
@@ -669,17 +700,22 @@ function drawSinusBeats(f: Frame, baselineY: number, t: number, primary: number)
 }
 
 // 2-1b — domain: load-scaled ECG, sinus or AFib depending on whether CI is
-// amiss, baselined a row above the active glyph's so the two read as
-// distinct instruments. `amiss` (unresolved-red count on an incomplete
-// chain — Task 1's derivePurview()["2-1b"].secondary) switches sinus to
-// AFib at the same intensity budget: bulk stays at 2, the R-tip accent
-// stays a ≤2px v=3 per beat. See drawSinusBeats for the sinus beat-count
-// rescale this wave introduced. Baseline renders at the same bulk v=2 as
-// the trace itself (pen-line fix, 2026-07-28) — see activeGlyphs["2-1b"]'s
-// comment for why.
+// amiss, baselined above the active glyph's so the two read as distinct
+// instruments. `amiss` (unresolved-red count on an incomplete chain —
+// Task 1's derivePurview()["2-1b"].secondary) switches sinus to AFib at the
+// same intensity budget: bulk stays at 2, the R-tip accent stays a ≤2px v=3
+// per beat. See drawSinusBeats for the sinus beat-count rescale this wave
+// introduced. Baseline renders at the same bulk v=2 as the trace itself
+// (pen-line fix, 2026-07-28) — see activeGlyphs["2-1b"]'s comment for why.
+//
+// Baseline 12->14 (amplitude wave, 2026-07-28): dropped 2 rows to buy more
+// headroom for the taller R spike (drawPqrst's amplitude wave) without
+// crowding the R-tip toward row 0 — also directly benefits AFib's own
+// baseline-aware height clamp (drawAfibComplex's `min(14, baselineY-1)`),
+// which now reaches its full 13px cap instead of being capped at 11.
 domainGlyphs["2-1b"] = (t, counts) => {
   const f = blank();
-  const baselineY = 12;
+  const baselineY = 14;
   hline(f, 0, DMD_W - 1, baselineY, 2);
   const amiss = counts.secondary > 0;
   if (amiss) {
