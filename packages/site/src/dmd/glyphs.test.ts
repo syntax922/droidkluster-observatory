@@ -275,19 +275,26 @@ describe("2-1b PQRST", () => {
   // Recalibration plant (morphology wave 2026-07-28; re-verified after fix
   // round 1's rColumns() hardening moved the apex column from the upstroke
   // to the tip's own start; re-verified again after the amplitude wave
-  // moved the domain baseline 12->14 and steepened both QRS bridges).
+  // moved the domain baseline 12->14 and steepened both QRS bridges;
+  // re-verified again for the column-fill wave, 2026-07-28, which replaced
+  // the Bresenham bridge with columnFillLine — see below for how the
+  // mechanism, and the exact crossing column, changed).
   // Proves the P-window ([-9,-5]) isn't vacuously passing. The Q->R-upstroke
   // bridge (see drawPqrst's NOTE comment) genuinely DOES cross row
-  // baseline-2, within 1-2 columns of the apex, in BOTH rhythms — but NOT at
-  // the same relative offset: sinus's Q dip (dy=+2) to R-upstroke (dy=-7) is
-  // a 9-row climb in one x-step, steep enough that Bresenham splits it
-  // across the apex-2 column (crossing lands at relative offset -2); AFib's
-  // Q (dy=+1) to upstroke (dy=-5) is a shallower 6-row climb, unchanged by
-  // this wave, still splitting at apex-1 (relative offset -1). Checking a
-  // small margin ([-4,-1], entirely outside the window's -5 edge) rather
-  // than one hardcoded offset covers both without conflating them. First
-  // confirm the crossing is real (so this isn't testing nothing), then
-  // confirm the window excludes it.
+  // baseline-2, within 1-2 columns of the apex, in BOTH rhythms. This
+  // bridge's destination (the R-upstroke) is a bulk-v point, not an accent,
+  // so columnFillLine credits the WHOLE per-column span to the SOURCE
+  // column (the Q point) regardless of the segment's steepness — see
+  // columnFillLine's own comment. Under the old Bresenham bridge the
+  // crossing column depended on each rhythm's own slope (sinus split at
+  // relative offset -2, AFib at -1); column-fill's source-crediting rule
+  // doesn't care about slope, so BOTH rhythms now land at the SAME relative
+  // offset, -2 (Q's own column, one before the R-upstroke's) — verified
+  // empirically. Checking a small margin ([-4,-1], entirely outside the
+  // window's -5 edge) rather than one hardcoded offset covers both without
+  // conflating them, and still holds even though the two rhythms no longer
+  // differ. First confirm the crossing is real (so this isn't testing
+  // nothing), then confirm the window excludes it.
   it("P-window survives the Q->R-upstroke bridge's own baseline-2 crossing (recalibration plant)", () => {
     for (const amiss of [0, 1] as const) {
       const f = dom(2, amiss) as Frame;
@@ -614,6 +621,71 @@ describe("2-1b ECG trace continuity (fix round 2)", () => {
 // way fix round 2 pinned Chebyshev-1: every lit pixel in the scene band must
 // have an orthogonal lit neighbor, across a full sweep, in every
 // state/rhythm combination.
+// Fix round 1 (apex-widening P1, 2026-07-28): a reviewer sweep of the
+// column-fill wave found the R apex row rendering 3px wide (bulk v beside
+// both v=3 tip pixels) in ~97% of beats — columnFillLine credited a
+// single-column entry bridge's WHOLE span to the SOURCE column, which for
+// the upstroke->tip bridge includes the apex row itself, painting bulk v
+// into the column immediately beside the tip at the exact tip row. This
+// pins the needle contract the reviewer's scan implies: for every
+// horizontal run of v=3 (tip) pixels, the pixels immediately left and right
+// of the run, in that SAME row, must be unlit — a bulk-v neighbor there
+// reads as a 3-wide (or wider) blob, not a sharp point.
+describe("2-1b R-tip needle contract (fix round 1)", () => {
+  function assertNeedleNotBlobbed(f: Frame): void {
+    for (let y = 0; y < 24; y++) {
+      let x = 0;
+      while (x < DMD_W) {
+        if (f[y * DMD_W + x] !== 3) {
+          x++;
+          continue;
+        }
+        let runEnd = x;
+        while (runEnd + 1 < DMD_W && f[y * DMD_W + (runEnd + 1)] === 3) runEnd++;
+        const leftX = x - 1;
+        const rightX = runEnd + 1;
+        if (leftX >= 0) {
+          expect(
+            f[y * DMD_W + leftX] ?? 0,
+            `row ${y} col ${leftX} (left of v=3 run [${x},${runEnd}])`,
+          ).toBe(0);
+        }
+        if (rightX < DMD_W) {
+          expect(
+            f[y * DMD_W + rightX] ?? 0,
+            `row ${y} col ${rightX} (right of v=3 run [${x},${runEnd}])`,
+          ).toBe(0);
+        }
+        x = runEnd + 1;
+      }
+    }
+  }
+
+  it("domain sinus: no bulk-v pixel flanks the R-tip run, swept across a full sweep", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      assertNeedleNotBlobbed(dmdFrame("2-1b", "domain", t, { primary: 2, secondary: 0 }) as Frame);
+    }
+  });
+
+  it("domain AFib: no bulk-v pixel flanks the R-tip run, swept across a full sweep", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      assertNeedleNotBlobbed(dmdFrame("2-1b", "domain", t, { primary: 3, secondary: 1 }) as Frame);
+    }
+  });
+
+  it("active (always-AFib): no bulk-v pixel flanks the R-tip run, swept across a full sweep", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      assertNeedleNotBlobbed(dmdFrame("2-1b", "active", t, { primary: 3, secondary: 0 }) as Frame);
+    }
+  });
+
+  it("standby: no bulk-v pixel flanks the R-tip run (tipV===v at standby, so this is vacuous but pinned anyway)", () => {
+    for (let t = 0; t < 5000; t += 250) {
+      assertNeedleNotBlobbed(dmdFrame("2-1b", "idle", t) as Frame);
+    }
+  });
+});
+
 describe("2-1b ECG trace orthogonal continuity (column-fill wave)", () => {
   function assertNoCornerOnlyGaps(f: Frame): void {
     const lit = new Set<string>();
