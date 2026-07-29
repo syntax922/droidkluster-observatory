@@ -325,7 +325,7 @@ function tracePointPlotter(
   };
 }
 
-function drawPqrst(
+export function drawPqrst(
   f: Frame,
   xOrigin: number,
   baselineY: number,
@@ -454,19 +454,27 @@ function drawBaselineGaps(f: Frame, baselineY: number, v: number, spans: readonl
   for (let x = 0; x < DMD_W; x++) if (!coveredBy(x, spans)) px(f, x, baselineY, v);
 }
 
-function drawAfibWavelets(f: Frame, baselineY: number, tMs: number, v: number): void {
-  const bucket = Math.floor(tMs / 160);
+function drawAfibWavelets(f: Frame, baselineY: number, v: number, scroll: number): void {
   const put = tracePointPlotter(f, 0, baselineY, v);
-  let x = 0;
-  let i = 0;
-  while (x < DMD_W) {
-    const rand = mulberry32(i + bucket * 97);
-    const r = rand();
-    const dy = r < 0.35 ? -1 : r < 0.7 ? 1 : 0;
-    put(x, dy, v, i > 0);
-    const step = 2 + Math.floor(rand() * 2); // 2 or 3 columns to the next sample
-    x += step;
-    i++;
+  // The squiggle is printed on the same moving PAPER as the complexes: sample
+  // the noise at the paper position (screen x + scroll), so the fibrillation
+  // travels right-to-left with the beats instead of shimmering in place. It's
+  // also the only baseline AFib has — the draw line IS the graph line, exactly
+  // as in sinus (drawBaselineGaps' rationale).
+  const noise = (paperX: number) =>
+    mulberry32(Math.abs(Math.imul(paperX, 2654435761)) % 2147483647)();
+  for (let x = 0; x < DMD_W; x++) {
+    const p = x + scroll;
+    // 3-tap smoothing turns white noise into a wandering line rather than a
+    // per-column flicker; consecutive samples are bridged, so it renders as
+    // one continuous stroke.
+    const smooth = (noise(p - 1) + noise(p) + noise(p + 1)) / 3;
+    // Gain of 5, not 2: averaging three uniforms clusters hard around 0.5, so
+    // a x2 map left ~87% of columns flat — a straight line with occasional
+    // bumps, not fibrillation. This puts most columns off the baseline while
+    // the smoothing keeps it a wander rather than a flicker.
+    const dy = clamp(Math.round((smooth - 0.5) * 5), -1, 1);
+    put(x, dy, v, x > 0);
   }
 }
 
@@ -499,7 +507,7 @@ function drawAfibWavelets(f: Frame, baselineY: number, tMs: number, v: number): 
 // the top of the scene band, matching sinus's own R apex) instead of the old
 // [9,11]. Active is unaffected (min(14, 16-1)=14, already at its ceiling
 // before this wave).
-function drawAfibComplex(
+export function drawAfibComplex(
   f: Frame,
   x: number,
   baselineY: number,
@@ -548,23 +556,22 @@ function drawAfib(
   beats: number,
   v: number,
   tipV: number,
+  msPerPx: number,
 ): void {
   const sweepMs = 5120;
   const sweepIdx = Math.floor(tMs / sweepMs);
   const rand = mulberry32(sweepIdx * 733 + beats * 31);
   const base = DMD_W / beats;
-  const scroll = Math.floor(tMs / 80) % DMD_W;
+  // Same load-coded rate as sinus (sinusMsPerPx) and the same right-to-left
+  // direction — an amiss rhythm still has to read as the same instrument.
+  const scroll = Math.floor(tMs / msPerPx) % DMD_W;
   const placed: Array<{ x: number; amp: number }> = [];
   for (let i = 0; i < beats; i++) {
     const jitter = Math.round((rand() - 0.5) * base * 0.8);
     const amp = Math.round((rand() - 0.5) * 4); // ±2px
     placed.push({ x: Math.round(base * (i + 0.5)) + jitter - scroll, amp });
   }
-  // AFib's fibrillatory wander IS its baseline, and unlike the sinus rule it
-  // runs CONTINUOUSLY under the complexes — that's exactly what a real AFib
-  // strip shows, and a ±1px wander never hides a 14-row spike the way a
-  // straight full-width line did.
-  drawAfibWavelets(f, baselineY, tMs, v);
+  drawAfibWavelets(f, baselineY, v, scroll);
   for (const p of placed) drawAfibComplex(f, p.x, baselineY, v, tipV, p.amp);
 }
 
@@ -579,8 +586,8 @@ function drawAfib(
 activeGlyphs["2-1b"] = (t, counts) => {
   const f = blank();
   const baselineY = 14;
-  const beats = clamp(counts.primary, 1, 6);
-  drawAfib(f, baselineY, t, beats, 2, 3);
+  const beats = afibBeats(counts.primary);
+  drawAfib(f, baselineY, t, beats, 2, 3, sinusMsPerPx(counts.primary));
   return f;
 };
 
@@ -754,6 +761,14 @@ const SINUS_COMPLEX_W = 32; // dx 0-31 inclusive
 const SINUS_MS_PER_PX_RESTING = 80; // primary<=1
 const SINUS_MS_PER_PX_LOADED = 45; // primary>=6 (saturated)
 
+// AFib is a RAPID rhythm — a lone beat over a squiggle reads as nothing at
+// all. Floor the complex count at 4 so the irregularity has something to be
+// irregular ABOUT, and let CI load push it to 6 (the same saturation point
+// every other 2-1b mapping uses).
+export function afibBeats(primary: number): number {
+  return clamp(primary + 3, 4, 6);
+}
+
 export function sinusMsPerPx(primary: number): number {
   const load = clamp(primary, 1, 6);
   return (
@@ -794,8 +809,8 @@ domainGlyphs["2-1b"] = (t, counts) => {
   const baselineY = 14;
   const amiss = counts.secondary > 0;
   if (amiss) {
-    const beats = clamp(counts.primary, 1, 6);
-    drawAfib(f, baselineY, t, beats, 2, 3);
+    const beats = afibBeats(counts.primary);
+    drawAfib(f, baselineY, t, beats, 2, 3, sinusMsPerPx(counts.primary));
   } else {
     drawSinusBeats(f, baselineY, t, counts.primary);
   }
