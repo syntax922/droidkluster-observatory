@@ -1,3 +1,5 @@
+import { DEFAULT_CODER_LOGIN } from "@observatory/core";
+
 export interface ProjectorConfig {
   natsServers: string[];
   natsNkeySeedFile?: string;
@@ -12,6 +14,7 @@ export interface ProjectorConfig {
   ignorePrs: ReadonlySet<number>;
   sourceRepo: string;
   redactTerms: readonly string[];
+  coderLogin: string;
 }
 
 function req(env: Record<string, string | undefined>, name: string): string {
@@ -106,5 +109,7 @@ export function readConfig(env: Record<string, string | undefined>): ProjectorCo
     ignorePrs: intSetEnv(env, "OBSERVATORY_IGNORE_PRS", [99999]),
     sourceRepo: req(env, "OBSERVATORY_SOURCE_REPO"),
     redactTerms: csvOpt(env, "OBSERVATORY_REDACT_TERMS"),
+    // Login the coder runs as; a PR assignment to it is what starts a rework.
+    coderLogin: env.OBSERVATORY_CODER_LOGIN || DEFAULT_CODER_LOGIN,
   };
 }

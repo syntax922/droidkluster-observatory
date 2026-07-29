@@ -16,6 +16,7 @@ export const PublicEventKindSchema = z.enum([
   "pr_closed",
   "issue_dispatched",
   "coder_completed",
+  "rework_started",
   "merge_queued",
   "merge_executed",
 ]);

@@ -24,6 +24,8 @@ export interface FleetState {
   feed: PublicEvent[];
 }
 
+export const DEFAULT_CODER_LOGIN = "droidkluster";
+
 const FEED_MAX = 100;
 const CHAIN_EVENTS_MAX = 200;
 const CHAIN_HOPS_MAX = 200;
@@ -65,6 +67,7 @@ function classify(
   payload: unknown,
   repo: string,
   redactTerms: readonly string[],
+  coderLogin: string,
 ): Classified | null {
   const p = obj(payload) ?? {};
   const tokens = subject.split(".");
@@ -200,6 +203,27 @@ function classify(
           pr,
           summary: `review requested · PR #${pr}`,
         };
+      case "assigned": {
+        // A rework STARTING is only ever a command on the bus
+        // (droidkluster.command.coder.<id>) — the dispatcher deliberately does
+        // not publish a dashboard event for it ("rework belongs to the PR
+        // dashboard, not the issue lanes"), and this projector reads events,
+        // not commands. So R5 was invisible for the entire duration of a
+        // rework: the board only ever saw coder.completed, the END.
+        //
+        // The assignment webhook IS an event we already receive, and it is the
+        // exact trigger the dispatcher itself gates on, so it is the honest
+        // start-of-work signal. Any other assignee is a human action, not R5's.
+        const assignee = str(obj(p.assignee)?.login);
+        if (assignee !== coderLogin) return null;
+        return {
+          kind: "rework_started",
+          droid: "r5",
+          pr,
+          summary: `R5 reworking PR #${pr}`,
+          activate: { droid: "r5", task: `reworking PR #${pr}` },
+        };
+      }
       case "review_started":
         return {
           kind: "review_started",
@@ -305,6 +329,13 @@ function classify(
 
 export interface ReduceOpts {
   repo: string;
+  /**
+   * GitHub login the coder runs as. A PR ASSIGNMENT to this login is what
+   * dispatches a rework — see the fleet's issue-dispatcher, whose gate is
+   * exactly action==='assigned' && assignee.login===botLogin. Configurable so
+   * a change of bot identity is an env flip, not a code change.
+   */
+  coderLogin?: string;
   ignorePrs?: ReadonlySet<number>;
   redactTerms?: readonly string[];
 }
@@ -314,7 +345,13 @@ export function reduce(
   env: CanonEnvelope,
   opts: ReduceOpts,
 ): { state: FleetState; emitted: PublicEvent[] } {
-  const c = classify(env.subject, env.payload, opts.repo, opts.redactTerms ?? []);
+  const c = classify(
+    env.subject,
+    env.payload,
+    opts.repo,
+    opts.redactTerms ?? [],
+    opts.coderLogin ?? DEFAULT_CODER_LOGIN,
+  );
   if (!c) return { state, emitted: [] };
   if (c.pr !== undefined && opts.ignorePrs?.has(c.pr)) return { state, emitted: [] };
   const at = env.ts ?? new Date(0).toISOString();
