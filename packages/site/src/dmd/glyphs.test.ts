@@ -421,8 +421,10 @@ describe("2-1b PQRST", () => {
   // (y=12) in ~10.5% of frames — h could jitter to 13-14, sending the tip
   // to y<=-1, which px()'s bounds check quietly no-ops. The fix caps h to
   // the available headroom (drawAfibComplex's own comment). Pin the FLOOR,
-  // not just an upper bound: the v=3 pixel count must be EXACTLY beats*2
-  // (2px tip x beats), never less — across a real sweep of both primary
+  // not just an upper bound: the v=3 pixel count must be EXACTLY beats
+  // (1px tip x beats — the curvature wave narrowed the apex from 2px to a
+  // single column so the spike converges to a point instead of a flat top;
+  // see drawPqrst/drawAfibComplex), never less — across a real sweep of both primary
   // (which sets beats) and sweepIdx (which reseeds the PRNG driving
   // ampAdjust, per drawAfib's own comment on its rand stream), and across
   // BOTH baselines domain (12, the one that broke) and active (16, the one
@@ -431,24 +433,24 @@ describe("2-1b PQRST", () => {
   describe("AFib R-tip never clips (fix round 1 floor-side regression)", () => {
     const beatsFor = (primary: number) => Math.max(1, Math.min(6, primary));
 
-    it("domain AFib: v=3 pixel count is exactly beats*2 across a full (primary, sweepIdx) sweep", () => {
+    it("domain AFib: v=3 pixel count is exactly beats (1px tip) across a full (primary, sweepIdx) sweep", () => {
       for (const primary of [1, 2, 3, 4, 5, 6]) {
         for (let sweepIdx = 0; sweepIdx < 20; sweepIdx++) {
           const t = sweepIdx * 5120; // sweepMs, see drawAfib
           const f = dmdFrame("2-1b", "domain", t, { primary, secondary: 1 }) as Frame;
           const v3 = f.filter((v) => v === 3).length;
-          expect(v3).toBe(beatsFor(primary) * 2);
+          expect(v3).toBe(beatsFor(primary));
         }
       }
     });
 
-    it("active AFib: v=3 pixel count is exactly beats*2 across the same sweep (baseline=16, already fine — pinned against future regression)", () => {
+    it("active AFib: v=3 pixel count is exactly beats (1px tip) across the same sweep (baseline=16, already fine — pinned against future regression)", () => {
       for (const primary of [1, 2, 3, 4, 5, 6]) {
         for (let sweepIdx = 0; sweepIdx < 20; sweepIdx++) {
           const t = sweepIdx * 5120;
           const f = dmdFrame("2-1b", "active", t, { primary, secondary: 0 }) as Frame;
           const v3 = f.filter((v) => v === 3).length;
-          expect(v3).toBe(beatsFor(primary) * 2);
+          expect(v3).toBe(beatsFor(primary));
         }
       }
     });
