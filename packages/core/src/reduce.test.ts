@@ -637,3 +637,44 @@ describe("rework visibility (R5)", () => {
     expect(done.state.droids.r5.last_action).toContain("reworked");
   });
 });
+
+describe("rework start via the review-feedback-router's own input", () => {
+  const posterReview = (state: string, deduped = false) => ({
+    kind: "event" as const,
+    id: `e-poster-${state}-${deduped}`,
+    subject: "exampleproj.event.poster_review.completed.c1f-uuid",
+    ts: "2026-07-29T06:18:09Z",
+    payload: {
+      pr: { owner: "o", repo: "r", number: 1770 },
+      review_id: 55,
+      review_state: state,
+      deduped,
+    },
+  });
+
+  it("REQUEST_CHANGES (not deduped) activates r5 — this is the real rework trigger", () => {
+    // Reworks are dispatched by the review-feedback-router off THIS event; the
+    // command it then publishes is invisible to an event reader. Mirroring the
+    // router's gate is the only honest way to show the work while it happens.
+    const { state, emitted } = reduce(emptyFleetState(), posterReview("REQUEST_CHANGES"), OPTS);
+    expect(emitted[0]?.kind).toBe("rework_started");
+    expect(emitted[0]?.pr).toBe(1770);
+    expect(state.droids.r5.task).toBe("reworking PR #1770");
+  });
+
+  it("an approval routes no rework, so it claims none", () => {
+    const { state, emitted } = reduce(emptyFleetState(), posterReview("APPROVE"), OPTS);
+    expect(emitted).toHaveLength(0);
+    expect(state.droids.r5.task).toBeUndefined();
+  });
+
+  it("a deduped verdict routes no rework either — same gate as the router", () => {
+    const { state, emitted } = reduce(
+      emptyFleetState(),
+      posterReview("REQUEST_CHANGES", true),
+      OPTS,
+    );
+    expect(emitted).toHaveLength(0);
+    expect(state.droids.r5.task).toBeUndefined();
+  });
+});
