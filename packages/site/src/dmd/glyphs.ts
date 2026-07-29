@@ -513,6 +513,12 @@ function drawAfibComplex(
   // one continuous Q-R-S stroke with no flat gaps to skip.
   const put = tracePointPlotter(f, x, baselineY, v);
   put(-3, 1, v); // Q
+  // Q sits one row below the baseline and is a chain START (no incoming
+  // bridge), so a wrap-seam skip of its forward bridge can strand it — the
+  // fibrillatory wander it would otherwise lean on is itself ±1px and can be
+  // on the far side. A 2px connector to the baseline row closes that for good
+  // (harmless overlap otherwise: px is max-blend).
+  vline(f, wrapX(x - 3), baselineY, baselineY + 1, v);
   put(-2, -5, v, true); // upstroke shoulders (see drawPqrst's QRS comment)
   put(-1, -10, v, true);
   put(0, -h, tipV, true); // R apex — single-column point
@@ -552,7 +558,7 @@ function drawAfib(
   for (let i = 0; i < beats; i++) {
     const jitter = Math.round((rand() - 0.5) * base * 0.8);
     const amp = Math.round((rand() - 0.5) * 4); // ±2px
-    placed.push({ x: Math.round(base * (i + 0.5)) + jitter + scroll, amp });
+    placed.push({ x: Math.round(base * (i + 0.5)) + jitter - scroll, amp });
   }
   // AFib's fibrillatory wander IS its baseline, and unlike the sinus rule it
   // runs CONTINUOUSLY under the complexes — that's exactly what a real AFib
@@ -755,10 +761,14 @@ export function sinusMsPerPx(primary: number): number {
   );
 }
 
+// Scroll direction: RIGHT-TO-LEFT. A monitor writes the newest sample at the
+// right edge and marches history off to the left (the paper-feed idiom every
+// rhythm strip inherits); adding the scroll offset instead ran the trace
+// backwards. wrapX normalises the resulting negative origins.
 function drawSinusBeats(f: Frame, baselineY: number, t: number, primary: number): void {
   const scroll = Math.floor(t / sinusMsPerPx(primary)) % DMD_W;
   const opts = { v: 2, tipV: 3 };
-  const origin = Math.round(DMD_W / 2 - SINUS_R_OFFSET) + scroll;
+  const origin = Math.round(DMD_W / 2 - SINUS_R_OFFSET) - scroll;
   // Baseline first, only outside the complex (see drawBaselineGaps), then the
   // complex — so no bright rule crosses the QRS.
   drawBaselineGaps(f, baselineY, opts.v, [{ start: origin, len: SINUS_COMPLEX_W }]);
@@ -1155,7 +1165,7 @@ export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
     const f = blank();
     const baselineY = 14;
     const period = 5000;
-    const xOrigin = Math.floor(((t % period) / period) * DMD_W);
+    const xOrigin = DMD_W - Math.floor(((t % period) / period) * DMD_W);
     drawBaselineGaps(f, baselineY, 2, [{ start: xOrigin, len: SINUS_COMPLEX_W }]);
     drawPqrst(f, xOrigin, baselineY, { v: 2, tipV: 2 });
     return f;

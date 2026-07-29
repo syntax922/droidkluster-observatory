@@ -405,9 +405,14 @@ describe("2-1b PQRST", () => {
     it("a busier CI advances the trace further in the same elapsed time", () => {
       const apexAt = (primary: number, t: number) =>
         rColumns(dmdFrame("2-1b", "domain", t, { primary, secondary: 0 }) as Frame)[0] as number;
-      const restingTravel = apexAt(1, 900) - apexAt(1, 0);
-      const loadedTravel = apexAt(6, 900) - apexAt(6, 0);
-      expect(loadedTravel).toBeGreaterThan(restingTravel);
+      // Travel is measured as DISTANCE, not signed delta: the trace scrolls
+      // right-to-left (see drawSinusBeats), so a busier CI moves the apex
+      // further left in the same elapsed time.
+      const travel = (primary: number) => {
+        const d = apexAt(primary, 0) - apexAt(primary, 900);
+        return ((d % DMD_W) + DMD_W) % DMD_W;
+      };
+      expect(travel(6)).toBeGreaterThan(travel(1));
     });
 
     it("spacing saturates at primary=6 — primary=6 and primary=10 have identical R-R gap", () => {
