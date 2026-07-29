@@ -71,11 +71,25 @@ function classify(
 
   // merge-decider family: <repo>.event.merge_decision.reached.<pr>
   if (subject.startsWith(`${repo}.event.merge_decision.reached.`)) {
-    const pr = num(p.pr_number) ?? num(Number(tokens[tokens.length - 1]));
-    const rawVerdict = (str(p.verdict) ?? "DECIDED").toUpperCase();
-    const verdict = ["APPROVED", "REJECTED", "DEFERRED", "DECIDED"].includes(rawVerdict)
-      ? rawVerdict
-      : "DECIDED";
+    // The subject tail is the COMMAND id (a uuid), never the PR — the merge
+    // decider keys its events by command. Reading the PR out of the payload is
+    // the only route; `pr` is what the decider actually sends (pr_number kept
+    // as a fallback for older/other publishers). Getting this wrong silently
+    // dropped every merge decision: Number("<uuid>") is NaN, so the guard
+    // below bailed and the event never reached the board.
+    const pr = num(p.pr) ?? num(p.pr_number) ?? num(Number(tokens[tokens.length - 1]));
+    // The decider's own vocabulary is approve | request_changes | comment
+    // (see its MergeDecisionSchema) — the previous allowlist expected review
+    // states that never arrive, so every decision rendered as "DECIDED".
+    const rawVerdict = (str(p.verdict) ?? "").toLowerCase();
+    const verdict =
+      rawVerdict === "approve"
+        ? "APPROVED"
+        : rawVerdict === "request_changes"
+          ? "CHANGES_REQUESTED"
+          : rawVerdict === "comment"
+            ? "COMMENTED"
+            : "DECIDED";
     if (!pr) return null;
     return {
       kind: "merge_decision",
@@ -83,6 +97,44 @@ function classify(
       pr,
       summary: `merge decision: ${verdict} · PR #${pr}`,
       idle: { droid: "tt-8l", last_action: `merge decision ${verdict} on PR #${pr}` },
+    };
+  }
+
+  // merge-queue family: <repo>.event.merge_queue.enqueue.<pr>
+  // A PR admitted to the merge queue is the moment TT-8L starts working — it
+  // has a package to ship. This is what puts the station into `active` (the
+  // rocket-loading dock); nothing else ever did, which is why that scene was
+  // unreachable in production despite shipping.
+  if (subject.startsWith(`${repo}.event.merge_queue.enqueue.`)) {
+    const pr = num(p.pr) ?? num(Number(tokens[tokens.length - 1]));
+    if (!pr) return null;
+    return {
+      kind: "merge_queued",
+      droid: "tt-8l",
+      pr,
+      summary: `PR #${pr} queued for merge`,
+      activate: { droid: "tt-8l", task: `merging PR #${pr}` },
+    };
+  }
+
+  // merge-execution family: <repo>.event.merge.executed.<id>
+  // The queue's verdict on that package: merged, refused, or a dry run. Either
+  // way TT-8L's work on it is done, so the station stands down (a real merge
+  // also lands a GitHub pr_merged, which is what fires the blast-off).
+  if (subject.startsWith(`${repo}.event.merge.executed.`)) {
+    const pr = num(p.pr) ?? num(Number(tokens[tokens.length - 1]));
+    if (!pr) return null;
+    const rawOutcome = (str(p.outcome) ?? "executed").toLowerCase();
+    const outcome = ["merged", "refused", "would_merge_test"].includes(rawOutcome)
+      ? rawOutcome
+      : "executed";
+    return {
+      kind: "merge_executed",
+      droid: "tt-8l",
+      pr,
+      summary: `merge ${outcome} · PR #${pr}`,
+      idle: { droid: "tt-8l", last_action: `merge ${outcome} · PR #${pr}` },
+      ...(outcome === "merged" ? { complete: true } : {}),
     };
   }
 

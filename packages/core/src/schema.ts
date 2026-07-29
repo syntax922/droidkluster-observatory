@@ -16,6 +16,8 @@ export const PublicEventKindSchema = z.enum([
   "pr_closed",
   "issue_dispatched",
   "coder_completed",
+  "merge_queued",
+  "merge_executed",
 ]);
 export type PublicEventKind = z.infer<typeof PublicEventKindSchema>;
 

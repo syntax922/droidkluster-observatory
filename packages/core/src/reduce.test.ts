@@ -99,19 +99,80 @@ describe("reduce", () => {
     expect(state.droids["2-1b"].task).toBe("diagnosing PR #1700 · test-unit");
   });
 
-  it("merge_decision records tt-8l action and completes nothing yet", () => {
+  it("merge_decision reads the PR from the payload — the subject tail is a command uuid", () => {
+    // Producer-faithful fixture: the merge decider keys the subject by COMMAND
+    // id and carries the PR as `pr` (see its own publish call). The previous
+    // fixture invented `pr_number` + an uppercase verdict, so it passed while
+    // every real event was being dropped — Number("<uuid>") is NaN.
     const s = reduce(emptyFleetState(), prOpened, OPTS).state;
     const { state, emitted } = reduce(
       s,
-      env("exampleproj.event.merge_decision.reached.1700", {
-        pr_number: 1700,
-        verdict: "APPROVED",
+      env("exampleproj.event.merge_decision.reached.8dde3b0b-0d79-546b-a141-94b0bac82909", {
+        pr: 1700,
+        verdict: "approve",
       }),
       OPTS,
     );
+    expect(emitted[0]?.kind).toBe("merge_decision");
+    expect(emitted[0]?.pr).toBe(1700);
     expect(state.droids["tt-8l"].last_action).toContain("APPROVED");
     expect(state.droids["tt-8l"].last_action_at).toBe("2026-07-25T14:00:00Z");
-    expect(emitted[0]?.kind).toBe("merge_decision");
+  });
+
+  it("merge_decision maps the decider's own verdict vocabulary", () => {
+    const verdictFor = (raw: string) => {
+      const { emitted } = reduce(
+        emptyFleetState(),
+        env("exampleproj.event.merge_decision.reached.cmd-uuid", { pr: 1700, verdict: raw }),
+        OPTS,
+      );
+      return emitted[0]?.summary ?? "";
+    };
+    expect(verdictFor("approve")).toContain("APPROVED");
+    expect(verdictFor("request_changes")).toContain("CHANGES_REQUESTED");
+    expect(verdictFor("comment")).toContain("COMMENTED");
+    expect(verdictFor("something_new")).toContain("DECIDED");
+  });
+
+  it("merge_queue.enqueue ACTIVATES tt-8l — the only thing that ever does", () => {
+    const s = reduce(emptyFleetState(), prOpened, OPTS).state;
+    const { state, emitted } = reduce(
+      s,
+      env("exampleproj.event.merge_queue.enqueue.1700", { pr: 1700, queue_depth: 1 }),
+      OPTS,
+    );
+    expect(emitted[0]?.kind).toBe("merge_queued");
+    expect(state.droids["tt-8l"].task).toBe("merging PR #1700");
+    expect(state.droids["tt-8l"].since).toBe("2026-07-25T14:00:00Z");
+  });
+
+  it("merge.executed stands tt-8l down and completes the chain only when merged", () => {
+    const queued = reduce(
+      reduce(emptyFleetState(), prOpened, OPTS).state,
+      env("exampleproj.event.merge_queue.enqueue.1700", { pr: 1700 }),
+      OPTS,
+    ).state;
+    const merged = reduce(
+      queued,
+      env("exampleproj.event.merge.executed.abc-uuid", { pr: 1700, outcome: "merged" }),
+      OPTS,
+    );
+    expect(merged.emitted[0]?.kind).toBe("merge_executed");
+    expect(merged.state.droids["tt-8l"].task).toBeUndefined();
+    expect(merged.state.droids["tt-8l"].last_action).toContain("merged");
+    expect(merged.state.chains.get(1700)?.complete).toBe(true);
+
+    const refused = reduce(
+      reduce(
+        reduce(emptyFleetState(), prOpened, OPTS).state,
+        env("exampleproj.event.merge_queue.enqueue.1700", { pr: 1700 }),
+        OPTS,
+      ).state,
+      env("exampleproj.event.merge.executed.def-uuid", { pr: 1700, outcome: "refused" }),
+      OPTS,
+    );
+    expect(refused.state.chains.get(1700)?.complete).toBe(false);
+    expect(refused.state.droids["tt-8l"].last_action).toContain("refused");
   });
 
   it("pr.closed with merged=true completes the chain", () => {

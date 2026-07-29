@@ -261,6 +261,10 @@ function syntheticSubject(e: PublicEvent): string {
       return `gh.event.${REPLAY_REPO}.copilot_session.ended.${e.pr}`;
     case "merge_decision":
       return `${REPLAY_REPO}.event.merge_decision.reached.${e.pr}`;
+    case "merge_queued":
+      return `${REPLAY_REPO}.event.merge_queue.enqueue.${e.pr}`;
+    case "merge_executed":
+      return `${REPLAY_REPO}.event.merge.executed.${e.pr}`;
     case "pr_merged":
     case "pr_closed":
       return `gh.event.${REPLAY_REPO}.pr.closed.${e.pr}`;
@@ -315,8 +319,24 @@ function syntheticPayload(e: PublicEvent): Record<string, unknown> {
       return { action: "started", pull_request: { number: pr } };
     case "copilot_session_ended":
       return { action: "ended", pull_request: { number: pr } };
-    case "merge_decision":
-      return { pr_number: pr, verdict: /decision: (\w+)/.exec(e.summary)?.[1] ?? "DECIDED" };
+    case "merge_decision": {
+      // The reducer reads the decider's own lowercase vocabulary, so map the
+      // rendered verdict back to it for a faithful round-trip.
+      const rendered = /decision: (\w+)/.exec(e.summary)?.[1] ?? "DECIDED";
+      const verdict =
+        rendered === "APPROVED"
+          ? "approve"
+          : rendered === "CHANGES_REQUESTED"
+            ? "request_changes"
+            : rendered === "COMMENTED"
+              ? "comment"
+              : rendered;
+      return { pr, verdict };
+    }
+    case "merge_queued":
+      return { pr };
+    case "merge_executed":
+      return { pr, outcome: /merge (\w+) ·/.exec(e.summary)?.[1] ?? "executed" };
     case "pr_merged":
       return { action: "closed", pull_request: { number: pr, merged: true } };
     case "pr_closed":
