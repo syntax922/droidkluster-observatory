@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { blank, DMD_W, type Frame } from "./frame.js";
 import {
+  afibBeats,
   blastOffFrame,
   celebrateFrame,
   type DmdState,
   dmdFrame,
+  drawAfibComplex,
   drawHeartRing,
+  drawPqrst,
   type GlyphCounts,
   sinusMsPerPx,
   standbyGlyphs,
@@ -268,18 +271,24 @@ describe("2-1b PQRST", () => {
     expect(above).toBeGreaterThan(0);
   });
 
-  it("sinus morphology has a P-wave bump before each R spike; AFib has none", () => {
-    const sinus = dom(2, 0) as Frame;
-    const afib = dom(2, 1) as Frame;
-    expect(Array.from(sinus)).not.toEqual(Array.from(afib));
+  it("sinus morphology has a P-wave bump before its R spike; AFib has none", () => {
+    // Checked at the RENDERER level, one complex alone in a blank frame. The
+    // old version scanned whole domain frames, which only worked while the
+    // rhythm was sparse: AFib is a rapid rhythm (afibBeats floors at 4), so a
+    // NEIGHBOURING complex can now sit inside the P-window of the one being
+    // examined and light it — a property of beat spacing, not of morphology.
+    // Isolating one complex tests the actual claim.
+    const originX = 8;
+    const sinus = blank();
+    drawPqrst(sinus, originX, DOMAIN_BASELINE_Y, { v: 2, tipV: 3 });
+    const afib = blank();
+    drawAfibComplex(afib, originX + 14, DOMAIN_BASELINE_Y, 2, 3, 0);
 
-    const sinusRs = rColumns(sinus);
-    expect(sinusRs.length).toBeGreaterThanOrEqual(1);
-    for (const rCol of sinusRs) expect(pRegionLit(sinus, rCol, DOMAIN_BASELINE_Y)).toBe(true);
-
-    const afibRs = rColumns(afib);
-    expect(afibRs.length).toBeGreaterThanOrEqual(1);
-    for (const rCol of afibRs) expect(pRegionLit(afib, rCol, DOMAIN_BASELINE_Y)).toBe(false);
+    // Both apexes land at the same column by construction (drawPqrst's R is at
+    // dx=14 from its origin; drawAfibComplex's is at its own x).
+    const rCol = originX + 14;
+    expect(pRegionLit(sinus, rCol, DOMAIN_BASELINE_Y)).toBe(true);
+    expect(pRegionLit(afib, rCol, DOMAIN_BASELINE_Y)).toBe(false);
   });
 
   // Recalibration plant (morphology wave 2026-07-28; re-verified after fix
@@ -306,34 +315,29 @@ describe("2-1b PQRST", () => {
   // differ. First confirm the crossing is real (so this isn't testing
   // nothing), then confirm the window excludes it.
   it("P-window survives the Q->R-upstroke bridge's own baseline-2 crossing (recalibration plant)", () => {
-    for (const amiss of [0, 1] as const) {
-      const f = dom(2, amiss) as Frame;
-      const row = DOMAIN_BASELINE_Y - 2;
-      for (const rCol of rColumns(f)) {
-        // The bridge artifact is real: baseline-2 is lit somewhere in the
-        // 4 columns immediately before the apex (margin, not an exact
-        // offset — see comment above for why the exact column differs by
-        // rhythm).
-        let hit = false;
-        for (let dx = -4; dx <= -1; dx++) {
-          if ((f[row * DMD_W + (rCol + dx)] ?? 0) > 0) hit = true;
-        }
-        expect(hit).toBe(true);
+    // Renderer-level for the same reason as the morphology test above: with a
+    // rapid AFib rhythm, whole-frame scans pick up neighbouring complexes.
+    // Draw ONE complex of each kind and check the artifact sits just outside
+    // the P-window's near edge, so the discriminator can't be fooled by it.
+    const originX = 8;
+    const rCol = originX + 14;
+    const row = DOMAIN_BASELINE_Y - 2;
+
+    const sinus = blank();
+    drawPqrst(sinus, originX, DOMAIN_BASELINE_Y, { v: 2, tipV: 3 });
+    const afib = blank();
+    drawAfibComplex(afib, rCol, DOMAIN_BASELINE_Y, 2, 3, 0);
+
+    for (const f of [sinus, afib]) {
+      let hit = false;
+      for (let dx = -4; dx <= -1; dx++) {
+        if ((f[row * DMD_W + (rCol + dx)] ?? 0) > 0) hit = true;
       }
+      expect(hit).toBe(true); // the bridge artifact is real in both rhythms
     }
-    // And the discriminator still tells the rhythms apart correctly despite
-    // that shared artifact sitting right next to the apex, just outside the
-    // window's -5 edge.
-    expect(
-      rColumns(dom(2, 0) as Frame).every((c) =>
-        pRegionLit(dom(2, 0) as Frame, c, DOMAIN_BASELINE_Y),
-      ),
-    ).toBe(true);
-    expect(
-      rColumns(dom(2, 1) as Frame).some((c) =>
-        pRegionLit(dom(2, 1) as Frame, c, DOMAIN_BASELINE_Y),
-      ),
-    ).toBe(false);
+    // ...and it never reaches into the window the discriminator actually scans.
+    expect(pRegionLit(sinus, rCol, DOMAIN_BASELINE_Y)).toBe(true);
+    expect(pRegionLit(afib, rCol, DOMAIN_BASELINE_Y)).toBe(false);
   });
 
   it("AFib R-R intervals are irregularly irregular; sinus shows one metronomic beat", () => {
@@ -439,7 +443,7 @@ describe("2-1b PQRST", () => {
   // that was already fine — pinned here so a future regression there would
   // also be caught).
   describe("AFib R-tip never clips (fix round 1 floor-side regression)", () => {
-    const beatsFor = (primary: number) => Math.max(1, Math.min(6, primary));
+    const beatsFor = (primary: number) => afibBeats(primary);
 
     it("domain AFib: v=3 pixel count is exactly beats (1px tip) across a full (primary, sweepIdx) sweep", () => {
       for (const primary of [1, 2, 3, 4, 5, 6]) {
