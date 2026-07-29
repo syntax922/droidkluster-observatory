@@ -171,7 +171,15 @@ describe("domain", () => {
 describe("2-1b PQRST", () => {
   const dom = (n: number, amiss = 0) =>
     dmdFrame("2-1b", "domain", 480, { primary: n, secondary: amiss });
-  const DOMAIN_BASELINE_Y = 12;
+  // Amplitude wave (2026-07-28): domainGlyphs["2-1b"]'s real baseline moved
+  // 12->14 to buy headroom for the taller R spike. This constant must track
+  // it — it drives every row computed below (pRegionLit, the recalibration
+  // plant, the AFib-baseline-margin plant), and a stale value here silently
+  // shifts every one of those checks onto the wrong absolute row without
+  // failing (the P wave is tall/wide enough that several of the checks
+  // still happened to land on lit pixels for the wrong reason — see the
+  // corrected pRegionLit comment below for how this was caught).
+  const DOMAIN_BASELINE_Y = 14;
 
   // Shared R-column finder: only the R spike (tip AND its steep upstroke
   // bridge) reaches y<6 (P/Q/S/T never do, at either baseline used by
@@ -210,16 +218,26 @@ describe("2-1b PQRST", () => {
   }
 
   // P-wave discriminator (recalibrated for the morphology wave, 2026-07-28:
-  // P widened from a 2-point bump to a 5-column rounded arc peaking at
-  // baseline-2, dx=2 relative to the complex's xOrigin). AFib's
-  // fibrillatory baseline jitter is contractually only ±1px (see
-  // drawAfibWavelets), so it can never reach baseline-2 — the window is
-  // centered on the P peak's measured offset from rColumns()'s apex column
-  // (dx=2 relative to xOrigin, dx=9 for the apex — a -7 delta), with a
-  // 2-column margin on each side. The plant test below proves the margin
-  // doesn't swallow the Q->R-upstroke bridge's own baseline-2 crossing
-  // (which lands at relative offset -1 from the apex — see drawPqrst's
-  // NOTE comment).
+  // P widened from a 2-point bump to a 5-column rounded arc). The scan row
+  // (baseline-2) is NOT the P peak itself — the amplitude wave (2026-07-28)
+  // moved the peak to baseline-5 (was baseline-2 at the morphology wave) —
+  // but baseline-2 sits squarely on P's rising/falling flank: drawPqrst's
+  // samples span dy 0 (dx=0,4) through dy=-5 (dx=2, the peak) and every
+  // intermediate row, including -2, is swept by the bridge connecting them
+  // (verified empirically: baseline-2 is lit at dx=1 and dx=3, one column in
+  // from each end of the hump). AFib's fibrillatory baseline jitter is
+  // contractually only dy ∈ {-1, 0, 1} (see drawAfibWavelets), so it can
+  // never reach baseline-2 regardless of which row within P's occupied band
+  // ([-5, 0]) is chosen — baseline-2 isn't a special row, just a convenient
+  // one comfortably inside that band. The window is centered on the P
+  // peak's measured offset from rColumns()'s apex column (dx=2 relative to
+  // xOrigin, dx=9 for the apex — a -7 delta), with a 2-column margin on
+  // each side. The plant test below proves the margin doesn't swallow the
+  // Q->R-upstroke bridge's own baseline-2 crossing (see drawPqrst's NOTE
+  // comment) — that crossing's exact column now differs by rhythm (the
+  // amplitude wave steepened sinus's Q->upstroke bridge more than AFib's,
+  // see the plant's own comment), so the plant checks a small margin rather
+  // than one hardcoded offset.
   function pRegionLit(f: Frame, rCol: number, baselineY: number): boolean {
     const row = baselineY - 2;
     for (let dx = -9; dx <= -5; dx++) {
@@ -256,26 +274,39 @@ describe("2-1b PQRST", () => {
 
   // Recalibration plant (morphology wave 2026-07-28; re-verified after fix
   // round 1's rColumns() hardening moved the apex column from the upstroke
-  // to the tip's own start). Proves the P-window ([-9,-5]) isn't vacuously
-  // passing. The Q->R-upstroke bridge (see drawPqrst's NOTE comment)
-  // genuinely DOES cross row baseline-2, at relative offset -1 from the
-  // apex column (i.e. one column before it, not AT it) — in BOTH rhythms,
-  // since drawAfibComplex's Q->upstroke bridge has the same steep shape.
-  // First confirm the crossing is real (so this isn't testing nothing),
-  // then confirm the window excludes it.
+  // to the tip's own start; re-verified again after the amplitude wave
+  // moved the domain baseline 12->14 and steepened both QRS bridges).
+  // Proves the P-window ([-9,-5]) isn't vacuously passing. The Q->R-upstroke
+  // bridge (see drawPqrst's NOTE comment) genuinely DOES cross row
+  // baseline-2, within 1-2 columns of the apex, in BOTH rhythms — but NOT at
+  // the same relative offset: sinus's Q dip (dy=+2) to R-upstroke (dy=-7) is
+  // a 9-row climb in one x-step, steep enough that Bresenham splits it
+  // across the apex-2 column (crossing lands at relative offset -2); AFib's
+  // Q (dy=+1) to upstroke (dy=-5) is a shallower 6-row climb, unchanged by
+  // this wave, still splitting at apex-1 (relative offset -1). Checking a
+  // small margin ([-4,-1], entirely outside the window's -5 edge) rather
+  // than one hardcoded offset covers both without conflating them. First
+  // confirm the crossing is real (so this isn't testing nothing), then
+  // confirm the window excludes it.
   it("P-window survives the Q->R-upstroke bridge's own baseline-2 crossing (recalibration plant)", () => {
     for (const amiss of [0, 1] as const) {
       const f = dom(2, amiss) as Frame;
       const row = DOMAIN_BASELINE_Y - 2;
       for (const rCol of rColumns(f)) {
-        // The bridge artifact is real: the column one before the apex is
-        // lit at baseline-2 (relative offset -1).
-        expect(f[row * DMD_W + (rCol - 1)] ?? 0).toBeGreaterThan(0);
+        // The bridge artifact is real: baseline-2 is lit somewhere in the
+        // 4 columns immediately before the apex (margin, not an exact
+        // offset — see comment above for why the exact column differs by
+        // rhythm).
+        let hit = false;
+        for (let dx = -4; dx <= -1; dx++) {
+          if ((f[row * DMD_W + (rCol + dx)] ?? 0) > 0) hit = true;
+        }
+        expect(hit).toBe(true);
       }
     }
     // And the discriminator still tells the rhythms apart correctly despite
-    // that shared artifact sitting right next to the apex (offset -1, just
-    // outside the window's -5 edge).
+    // that shared artifact sitting right next to the apex, just outside the
+    // window's -5 edge.
     expect(
       rColumns(dom(2, 0) as Frame).every((c) =>
         pRegionLit(dom(2, 0) as Frame, c, DOMAIN_BASELINE_Y),
@@ -623,10 +654,11 @@ describe("2-1b uniform trace intensity (pen-line fix, round 3)", () => {
   });
 
   // The undulating AFib baseline must never wander far enough to be mistaken
-  // for the P wave's own baseline-2 peak — see pRegionLit above. Plants the
+  // for the P wave's own baseline flank — see pRegionLit above. Plants the
   // amplitude contract directly against the wavelet renderer, independent of
   // the discriminator tests, across a full sweep and both baselines 2-1b's
-  // AFib states use (12 domain, 16 active).
+  // AFib states use (14 domain, 16 active — amplitude wave, 2026-07-28:
+  // domain was 12).
   it("AFib fibrillatory baseline never exceeds ±1px — the discriminator margin holds by construction", () => {
     // Any lit pixel at row baseline-2 must belong to a QRS complex (within a
     // few columns of a v=3 R-tip), never the wavelet — drawAfibWavelets'
@@ -636,7 +668,7 @@ describe("2-1b uniform trace intensity (pen-line fix, round 3)", () => {
     // board edge (wrapX-style) since a beat's xOrigin scrolls continuously
     // and can straddle the x=0/63 seam.
     for (const [state, baselineY, counts] of [
-      ["domain", 12, { primary: 1, secondary: 1 }],
+      ["domain", 14, { primary: 1, secondary: 1 }],
       ["active", 16, { primary: 1, secondary: 0 }],
     ] as const) {
       for (let t = 0; t < 5120; t += 80) {
