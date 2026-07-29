@@ -678,3 +678,61 @@ describe("rework start via the review-feedback-router's own input", () => {
     expect(state.droids.r5.task).toBeUndefined();
   });
 });
+
+describe("fleet namespace tolerance (deployed config vs source defaults)", () => {
+  // Every one of these families is published under the BRAND namespace in the
+  // deployed configmaps (RESULT_SUBJECT_PREFIX / NATS_FILTER_SUBJECT), while
+  // the fleet's own source defaults say <repo>. Keying on the source default
+  // is what silently dropped 100% of merge decisions — a non-matching subject
+  // classifies to null and vanishes without a trace.
+  const cases: Array<[string, string, Record<string, unknown>, string]> = [
+    [
+      "merge_decision",
+      "merge_decision.reached.uuid",
+      { pr: 1700, verdict: "approve" },
+      "merge_decision",
+    ],
+    [
+      "poster_review",
+      "poster_review.completed.uuid",
+      { pr: { number: 1770 }, review_state: "REQUEST_CHANGES", deduped: false },
+      "rework_started",
+    ],
+    ["merge_queue", "merge_queue.enqueue.1766", { pr: 1766 }, "merge_queued"],
+    ["merge_executed", "merge.executed.uuid", { pr: 1766, outcome: "merged" }, "merge_executed"],
+  ];
+
+  for (const [label, tail, payload, kind] of cases) {
+    it(`${label} classifies under BOTH the brand and repo namespaces`, () => {
+      for (const ns of ["droidkluster", "exampleproj"]) {
+        const { emitted } = reduce(
+          emptyFleetState(),
+          {
+            kind: "event",
+            id: `e-${label}-${ns}`,
+            subject: `${ns}.event.${tail}`,
+            ts: "2026-07-29T08:00:00Z",
+            payload,
+          },
+          OPTS,
+        );
+        expect(emitted[0]?.kind, `${label} under ${ns}`).toBe(kind);
+      }
+    });
+  }
+
+  it("coder.completed still classifies under the brand namespace it actually uses", () => {
+    const { emitted } = reduce(
+      emptyFleetState(),
+      {
+        kind: "event",
+        id: "e-coder",
+        subject: "droidkluster.event.coder.completed.uuid",
+        ts: "2026-07-29T08:00:00Z",
+        payload: { kind: "rework", pr_number: 1770, status: "reworked" },
+      },
+      OPTS,
+    );
+    expect(emitted[0]?.kind).toBe("coder_completed");
+  });
+});
