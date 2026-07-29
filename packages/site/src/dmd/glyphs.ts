@@ -370,13 +370,15 @@ function drawPqrst(
   // rows, then 2, then a 2-column crown, mirrored back down.
   put(0, 0, v);
   put(1, -3, v, true);
-  put(2, -5, v, true); // crown, dx 2-3
-  put(3, -5, v, true);
-  put(4, -3, v, true);
-  put(5, 0, v, true);
-  // dx 6: flat PR segment (baseline hline covers it) — intentionally NOT
+  put(2, -5, v, true);
+  put(3, -6, v, true); // crown, dx 3-4
+  put(4, -6, v, true);
+  put(5, -5, v, true);
+  put(6, -3, v, true);
+  put(7, 0, v, true);
+  // dx 8: flat PR segment (baseline hline covers it) — intentionally NOT
   // bridged from the P wave into Q, so the isoelectric segment stays flat.
-  put(7, 2, v); // Q dip
+  put(9, 3, v); // Q dip
   // Q's own forward edge (into the R upstroke, next) is a normal bridge, but
   // that bridge is skipped at the rare wrap-seam straddle (tracePointPlotter's
   // monotonic-x guard) — and unlike the pre-amplitude-wave Q (dy=1, always
@@ -385,7 +387,7 @@ function drawPqrst(
   // adjacency alone. A direct one-row connector closes that gap
   // unconditionally (harmless overlap with the normal bridge otherwise —
   // px() is max-blend), keeping Q chain-connected in every case, seam or not.
-  px(f, wrapX(xOrigin + 7), baselineY + 1, v);
+  vline(f, wrapX(xOrigin + 9), baselineY + 1, baselineY + 3, v);
   // R spike: narrow and TOWERING — the dominant vertical feature by a wide
   // margin over both P (5 rows) and T (7 rows). Upstroke/downstroke at bulk
   // v, bridged; the apex (dx 9-10, 2px wide) is the tip accent, 13px above
@@ -400,18 +402,20 @@ function drawPqrst(
   // line"). Stepping the climb and the fall over an extra column each
   // gives the silhouette converging slopes, so the eye reads a needle with
   // a distinct Q notch before it and an S trough after.
-  put(8, -6, v, true); // upstroke shoulder
-  put(9, -13, tipV, true); // R apex — a single-column point
-  put(10, -6, v, true); // downstroke shoulder
+  put(10, -5, v, true); // upstroke, lower shoulder
+  put(11, -10, v, true); // upstroke, upper shoulder
+  put(12, -14, tipV, true); // R apex — a single-column point
+  put(13, -10, v, true); // downstroke, upper shoulder
+  put(14, -5, v, true); // downstroke, lower shoulder
   // S: sharp undershoot below baseline — chain dead end (ST gap unbridged
   // forward), 6px from baseline (amplitude wave: was 5) so it needs the
   // anchor. This bridge's SOURCE is the tip's own column (dx=10, already
   // tipV at the apex row) — bulk-v filling through that row again is a
   // max-blend no-op, not a new widening (fix round 1's reserveDestinationRow
   // fix only applies when the DESTINATION is the accent, which S isn't).
-  put(11, 6, v, true, true); // S trough
-  put(12, 0, v, true); // return to baseline — makes the S read as a notch
-  // dx 13: flat ST segment (baseline hline covers it) — intentionally NOT
+  put(15, 8, v, true, true); // S trough
+  put(16, 0, v, true); // return to baseline — makes the S read as a notch
+  // dx 17: flat ST segment (baseline hline covers it) — intentionally NOT
   // bridged from S into T, matching the PR segment's flat treatment.
   // T wave: the WIDEST wave in the complex — 8 columns (dx 14-21), a smooth
   // rounded arc rising 7 rows (amplitude wave: was 3) with a 2-column flat
@@ -420,14 +424,16 @@ function drawPqrst(
   // anchor is needed.
   // Same elliptical treatment as P (steep off the baseline, flattening into
   // a 2-column crown) — a linear ramp here drew the "T pyramid".
-  put(14, 0, v);
-  put(15, -3, v, true);
-  put(16, -6, v, true);
-  put(17, -7, v, true); // crown, dx 17-18
-  put(18, -7, v, true);
-  put(19, -6, v, true);
-  put(20, -3, v, true);
-  put(21, 0, v, true);
+  put(18, 0, v);
+  put(19, -3, v, true);
+  put(20, -6, v, true);
+  put(21, -8, v, true);
+  put(22, -9, v, true); // crown, dx 22-23
+  put(23, -9, v, true);
+  put(24, -8, v, true);
+  put(25, -6, v, true);
+  put(26, -3, v, true);
+  put(27, 0, v, true);
 }
 
 // AFib fibrillatory baseline: a CONNECTED undulating polyline, not isolated
@@ -506,21 +512,23 @@ function drawAfibComplex(
   tipV: number,
   ampAdjust: number,
 ): void {
-  const h = clamp(11 + ampAdjust, 8, Math.min(14, baselineY - 1));
+  const h = clamp(13 + ampAdjust, 9, Math.min(14, baselineY));
   // Same bridging shape as drawPqrst's QRS (see tracePointPlotter) — no P
   // wave here (that's the point: AFib has none), so the whole complex is
   // one continuous Q-R-S stroke with no flat gaps to skip.
   const put = tracePointPlotter(f, x, baselineY, v);
-  put(-2, 1, v); // Q
-  put(-1, -6, v, true); // upstroke shoulder (see drawPqrst's QRS comment)
+  put(-3, 1, v); // Q
+  put(-2, -5, v, true); // upstroke shoulders (see drawPqrst's QRS comment)
+  put(-1, -10, v, true);
   put(0, -h, tipV, true); // R apex — single-column point
-  put(1, -6, v, true); // downstroke shoulder
+  put(1, -10, v, true); // downstroke shoulders
+  put(2, -5, v, true);
   // S: real undershoot below baseline — chain dead end (no forward point),
   // 6px out so it needs the anchor. Both this bridge and the downstroke
   // bridge above have the tip's own column as their SOURCE (already tipV at
   // the apex row), never a DESTINATION — fix round 1's reserveDestinationRow
   // only fires when the accent is the destination, so these are unaffected.
-  put(2, 6, v, true, true); // S trough
+  put(3, 8, v, true, true); // S trough
 }
 
 // Shared AFib renderer, parameterized by the caller's intensity budget.
@@ -564,7 +572,7 @@ function drawAfib(
 // the same weight as the beats themselves, not as a separate dim guide-line.
 activeGlyphs["2-1b"] = (t, counts) => {
   const f = blank();
-  const baselineY = 16;
+  const baselineY = 14;
   hline(f, 0, DMD_W - 1, baselineY, 2);
   const beats = clamp(counts.primary, 1, 6);
   drawAfib(f, baselineY, t, beats, 2, 3);
@@ -727,9 +735,9 @@ activeGlyphs.copilot = (t) => {
 // MORE dense/chaotic relative to sinus's sparser 1-2 beats — reinforcing
 // (not undermining) the intended contrast between a chaotic rhythm and an
 // obviously well-formed one.
-const SINUS_RR_GAP_LO = 26; // px, at primary>=6 (saturated)
-const SINUS_RR_GAP_HI = 32; // px, at primary<=2
-const SINUS_R_OFFSET = 9; // dx of the R-tip's first column within drawPqrst
+const SINUS_RR_GAP_LO = 30; // px, at primary>=6 (saturated)
+const SINUS_RR_GAP_HI = 34; // px, at primary<=2
+const SINUS_R_OFFSET = 12; // dx of the R-tip's column within drawPqrst
 
 function drawSinusBeats(f: Frame, baselineY: number, t: number, primary: number): void {
   const scroll = Math.floor(t / 80) % DMD_W;
@@ -1134,7 +1142,7 @@ export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
   // comment for why.
   "2-1b": (t) => {
     const f = blank();
-    const baselineY = 16;
+    const baselineY = 14;
     hline(f, 0, DMD_W - 1, baselineY, 2);
     const period = 5000;
     const xOrigin = Math.floor(((t % period) / period) * DMD_W);
