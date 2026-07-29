@@ -568,6 +568,95 @@ describe("2-1b ECG trace continuity (fix round 2)", () => {
   });
 });
 
+// Fix round 3 (pen-line wave, 2026-07-28): the fix round 2 continuity guard
+// above (assertNoIsolatedDots) already passed BEFORE this wave, because
+// every AFib jitter dot sat Chebyshev-adjacent to the always-lit baseline
+// hline underneath it — chebyshev-adjacency alone doesn't distinguish "one
+// continuous pen-line" from "a dim guide-line with disconnected specks
+// hovering next to it", which is exactly the bug the user's side-by-side
+// comparison against a real rhythm strip found. This block pins the actual
+// fix: every 2-1b pixel in the scene band renders at the SAME bulk
+// intensity as the rest of that state's trace (only the R-tip differs, at
+// tipV) — no v=1 baseline/wavelet pixels survive anywhere, across a full
+// sweep, in every state/rhythm combination.
+describe("2-1b uniform trace intensity (pen-line fix, round 3)", () => {
+  function litValues(f: Frame): Set<number> {
+    const vals = new Set<number>();
+    for (let y = 0; y < 24; y++)
+      for (let x = 0; x < DMD_W; x++) {
+        const v = f[y * DMD_W + x] ?? 0;
+        if (v > 0) vals.add(v);
+      }
+    return vals;
+  }
+
+  it("standby (resting sinus): only v=2 ever appears — no dimmer v=1 baseline", () => {
+    for (let t = 0; t < 5000; t += 250) {
+      const vals = litValues(dmdFrame("2-1b", "idle", t) as Frame);
+      expect(vals.has(1)).toBe(false);
+      expect([...vals].every((v) => v === 2)).toBe(true);
+    }
+  });
+
+  it("domain sinus: only v=2 (bulk) and v=3 (R-tip) appear — no v=1", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      const vals = litValues(dmdFrame("2-1b", "domain", t, { primary: 2, secondary: 0 }) as Frame);
+      expect(vals.has(1)).toBe(false);
+      expect([...vals].every((v) => v === 2 || v === 3)).toBe(true);
+    }
+  });
+
+  it("domain AFib: only v=2 (bulk, including the fibrillatory baseline) and v=3 (R-tip) appear — no v=1", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      const vals = litValues(dmdFrame("2-1b", "domain", t, { primary: 3, secondary: 1 }) as Frame);
+      expect(vals.has(1)).toBe(false);
+      expect([...vals].every((v) => v === 2 || v === 3)).toBe(true);
+    }
+  });
+
+  it("active (always AFib): only v=2 and v=3 appear — no v=1", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      const vals = litValues(dmdFrame("2-1b", "active", t, { primary: 3, secondary: 0 }) as Frame);
+      expect(vals.has(1)).toBe(false);
+      expect([...vals].every((v) => v === 2 || v === 3)).toBe(true);
+    }
+  });
+
+  // The undulating AFib baseline must never wander far enough to be mistaken
+  // for the P wave's own baseline-2 peak — see pRegionLit above. Plants the
+  // amplitude contract directly against the wavelet renderer, independent of
+  // the discriminator tests, across a full sweep and both baselines 2-1b's
+  // AFib states use (12 domain, 16 active).
+  it("AFib fibrillatory baseline never exceeds ±1px — the discriminator margin holds by construction", () => {
+    // Any lit pixel at row baseline-2 must belong to a QRS complex (within a
+    // few columns of a v=3 R-tip), never the wavelet — drawAfibWavelets'
+    // amplitude contract is dy in {-1, 0, 1}, so it should never reach this
+    // row on its own. Sweeping a full cycle catches any regression that
+    // widens the wavelet's jitter range. The search window wraps around the
+    // board edge (wrapX-style) since a beat's xOrigin scrolls continuously
+    // and can straddle the x=0/63 seam.
+    for (const [state, baselineY, counts] of [
+      ["domain", 12, { primary: 1, secondary: 1 }],
+      ["active", 16, { primary: 1, secondary: 0 }],
+    ] as const) {
+      for (let t = 0; t < 5120; t += 80) {
+        const f = dmdFrame("2-1b", state, t, counts) as Frame;
+        for (let x = 0; x < DMD_W; x++) {
+          if ((f[(baselineY - 2) * DMD_W + x] ?? 0) === 0) continue;
+          let nearTip = false;
+          for (let dx = -3; dx <= 3; dx++) {
+            const nx = (((x + dx) % DMD_W) + DMD_W) % DMD_W;
+            for (let y = 0; y < baselineY; y++) {
+              if (f[y * DMD_W + nx] === 3) nearTip = true;
+            }
+          }
+          expect(nearTip).toBe(true);
+        }
+      }
+    }
+  });
+});
+
 describe("tt-8l shipping department", () => {
   it("standby has no gate bars anymore and is calm", () => {
     const f = dmdFrame("tt-8l", "idle", 0);

@@ -201,6 +201,16 @@ activeGlyphs["hk-47"] = (t, counts) => {
 // diagnosing (that only happens because something failed). Shared by
 // standby (resting sinus), domain (sinus/AFib on unresolved CI red — see
 // Task 1's derivePurview()["2-1b"].secondary), and active (always AFib).
+//
+// "One continuous pen-line" contract (pen-line wave, 2026-07-28): every
+// state's trace — baseline AND complexes alike — renders at the SAME bulk
+// intensity (the state's own v; only the R-tip gets the tipV accent), and
+// every segment is either drawn as a run of Chebyshev-adjacent pixels or
+// explicitly bridged with plotLine (see tracePointPlotter, drawAfibWavelets).
+// A real ECG strip never shows the pen lifting, including in the
+// fibrillatory baseline between AFib beats — see each caller (activeGlyphs,
+// domainGlyphs, standbyGlyphs) for why their baseline hline uses the bulk v
+// rather than a dimmer fixed value.
 
 // One full PQRST complex, 22px wide (dx 0-21) starting at xOrigin (wrapped
 // into the board so a complex scrolling near the edge continues on the
@@ -353,18 +363,42 @@ function drawPqrst(
   put(21, 0, v, true);
 }
 
-// AFib fibrillatory baseline: sparse ±1px jitter wavelets between
-// complexes. Seeded on `floor(x/2)` (texture varies every 2 columns) plus a
-// `floor(tMs/160)` time bucket (the ×97 spreads the bucket into a distinct
-// region of the seed space so nearby (x, bucket) pairs don't alias into the
-// same mulberry32 state) — deterministic per frame, changes ~6x/sec.
-function drawAfibWavelets(f: Frame, baselineY: number, tMs: number): void {
+// AFib fibrillatory baseline: a CONNECTED undulating polyline, not isolated
+// jitter dots. Round 3 fix (pen-line wave, 2026-07-28): the original version
+// drew independent ±1px specks at v=1, one decision per column — at the
+// painter's alpha ramp (levelAlpha in palette.ts: v=1 is 25% alpha, v=2 is
+// 55%) those specks read as disconnected flecks rather than the wavering,
+// never-lifts-the-pen baseline a real AFib strip shows. This now samples a
+// jitter y every 2-3 columns (a real f-wave doesn't resolve at every pixel
+// either) and bridges consecutive samples with plotLine via the shared
+// tracePointPlotter, so the baseline between spikes is one continuous chain.
+// Renders at `v` — the caller's bulk intensity, not a fixed dim value — so
+// it reads with the same weight as the rest of the trace (see the module's
+// "uniform trace intensity" contract, drawSinusBeats/drawAfib callers).
+// Amplitude is unchanged at ±1px (dy in {-1, 0, 1}, same 35/35/30
+// down/up/flat split as the old per-column version) specifically so the
+// P-absence discriminator (pRegionLit in glyphs.test.ts, which checks row
+// baseline-2) is never at risk — the wavelets never reach past baseline±1.
+// Seeded on a sample index `i` plus a `floor(tMs/160)` time bucket (the ×97
+// spreads the bucket into a distinct region of the seed space, matching the
+// old per-column scheme) — deterministic per frame, changes ~6x/sec. The
+// step and the jitter share one mulberry32 draw per sample rather than two
+// independent streams: this is a texture generator, not a physically-modeled
+// signal, so a little correlation between "how far" and "which way" is an
+// acceptable simplicity trade, not a determinism or discriminator risk.
+function drawAfibWavelets(f: Frame, baselineY: number, tMs: number, v: number): void {
   const bucket = Math.floor(tMs / 160);
-  for (let x = 0; x < DMD_W; x++) {
-    const rand = mulberry32(Math.floor(x / 2) + bucket * 97);
+  const put = tracePointPlotter(f, 0, baselineY, v);
+  let x = 0;
+  let i = 0;
+  while (x < DMD_W) {
+    const rand = mulberry32(i + bucket * 97);
     const r = rand();
-    if (r < 0.35) px(f, x, baselineY - 1, 1);
-    else if (r < 0.7) px(f, x, baselineY + 1, 1);
+    const dy = r < 0.35 ? -1 : r < 0.7 ? 1 : 0;
+    put(x, dy, v, i > 0);
+    const step = 2 + Math.floor(rand() * 2); // 2 or 3 columns to the next sample
+    x += step;
+    i++;
   }
 }
 
@@ -429,7 +463,7 @@ function drawAfib(
   v: number,
   tipV: number,
 ): void {
-  drawAfibWavelets(f, baselineY, tMs);
+  drawAfibWavelets(f, baselineY, tMs, v);
   const sweepMs = 5120;
   const sweepIdx = Math.floor(tMs / sweepMs);
   const rand = mulberry32(sweepIdx * 733 + beats * 31);
@@ -447,10 +481,14 @@ function drawAfib(
 // something failed, so there's no sinus-rhythm active state to render.
 // Full brightness bulk (2) with a v=3 tip — active's budget is otherwise
 // unrestricted, but a heavier bulk would crowd the trace past readability.
+// The baseline hline renders at the SAME bulk v (2), not a dimmer fixed
+// value — see the "uniform trace intensity" pen-line fix (2026-07-28): a
+// real ECG is one continuous stroke, so the flat run between beats reads at
+// the same weight as the beats themselves, not as a separate dim guide-line.
 activeGlyphs["2-1b"] = (t, counts) => {
   const f = blank();
   const baselineY = 16;
-  hline(f, 0, DMD_W - 1, baselineY, 1);
+  hline(f, 0, DMD_W - 1, baselineY, 2);
   const beats = clamp(counts.primary, 1, 6);
   drawAfib(f, baselineY, t, beats, 2, 3);
   return f;
@@ -636,11 +674,13 @@ function drawSinusBeats(f: Frame, baselineY: number, t: number, primary: number)
 // chain — Task 1's derivePurview()["2-1b"].secondary) switches sinus to
 // AFib at the same intensity budget: bulk stays at 2, the R-tip accent
 // stays a ≤2px v=3 per beat. See drawSinusBeats for the sinus beat-count
-// rescale this wave introduced.
+// rescale this wave introduced. Baseline renders at the same bulk v=2 as
+// the trace itself (pen-line fix, 2026-07-28) — see activeGlyphs["2-1b"]'s
+// comment for why.
 domainGlyphs["2-1b"] = (t, counts) => {
   const f = blank();
   const baselineY = 12;
-  hline(f, 0, DMD_W - 1, baselineY, 1);
+  hline(f, 0, DMD_W - 1, baselineY, 2);
   const amiss = counts.secondary > 0;
   if (amiss) {
     const beats = clamp(counts.primary, 1, 6);
@@ -929,11 +969,13 @@ export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
   // 2-1b — resting sinus: a single full PQRST complex sweeping the width
   // once every 5s (replacing the old flat-baseline blip). Capped at v=2
   // everywhere, including the R-tip — standby never gets the v=3 accent
-  // domain/active use.
+  // domain/active use. Baseline renders at that same v=2 (pen-line fix,
+  // 2026-07-28), not a dimmer fixed value — see activeGlyphs["2-1b"]'s
+  // comment for why.
   "2-1b": (t) => {
     const f = blank();
     const baselineY = 16;
-    hline(f, 0, DMD_W - 1, baselineY, 1);
+    hline(f, 0, DMD_W - 1, baselineY, 2);
     const period = 5000;
     const xOrigin = Math.floor(((t % period) / period) * DMD_W);
     drawPqrst(f, xOrigin, baselineY, { v: 2, tipV: 2 });
