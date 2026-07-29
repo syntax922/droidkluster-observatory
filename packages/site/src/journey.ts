@@ -20,6 +20,8 @@ const STAGE_BY_KIND: Record<PublicEventKind, Stage | null> = {
   copilot_session_started: "rework",
   copilot_session_ended: "rework",
   merge_decision: "decision",
+  merge_queued: "decision",
+  merge_executed: "merged",
   pr_merged: "merged",
   pr_closed: "merged",
   issue_dispatched: null,
