@@ -599,6 +599,65 @@ describe("2-1b ECG trace continuity (fix round 2)", () => {
   });
 });
 
+// Column-fill wave (2026-07-28): the fix round 2 guard above only required
+// Chebyshev-1 (diagonal-OK) adjacency — a Bresenham diagonal stair-step
+// already satisfies that trivially, since each step IS diagonally adjacent
+// to the last by construction. But the user's live-board screenshot showed
+// those diagonal-only seams as visible corner gaps at the DMD's round-dot
+// pitch on steep strokes (the R up/downstrokes, the S recovery, the P/T
+// shoulders) — the dots touch at a corner, not an edge, and the round dot
+// shape leaves a visible notch there. The fix (columnFillLine) fills the
+// FULL per-column span a bridged segment crosses, so every column's fill
+// shares a full row with its neighboring column's fill — a strictly
+// stronger, orthogonal (von Neumann: up/down/left/right only, diagonal does
+// NOT count) adjacency contract. This pins that contract directly, the same
+// way fix round 2 pinned Chebyshev-1: every lit pixel in the scene band must
+// have an orthogonal lit neighbor, across a full sweep, in every
+// state/rhythm combination.
+describe("2-1b ECG trace orthogonal continuity (column-fill wave)", () => {
+  function assertNoCornerOnlyGaps(f: Frame): void {
+    const lit = new Set<string>();
+    for (let y = 0; y < 24; y++)
+      for (let x = 0; x < DMD_W; x++) if ((f[y * DMD_W + x] ?? 0) > 0) lit.add(`${x},${y}`);
+    expect(lit.size).toBeGreaterThan(0);
+    for (const key of lit) {
+      const [xs, ys] = key.split(",");
+      const x = Number(xs);
+      const y = Number(ys);
+      const hasOrthogonalNeighbor =
+        lit.has(`${x - 1},${y}`) ||
+        lit.has(`${x + 1},${y}`) ||
+        lit.has(`${x},${y - 1}`) ||
+        lit.has(`${x},${y + 1}`);
+      expect(hasOrthogonalNeighbor).toBe(true);
+    }
+  }
+
+  it("sinus (domain, beats=3) trace is orthogonally connected across a full sweep", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      assertNoCornerOnlyGaps(dmdFrame("2-1b", "domain", t, { primary: 3, secondary: 0 }) as Frame);
+    }
+  });
+
+  it("AFib (domain, amiss) trace is orthogonally connected across a full sweep", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      assertNoCornerOnlyGaps(dmdFrame("2-1b", "domain", t, { primary: 3, secondary: 1 }) as Frame);
+    }
+  });
+
+  it("standby (resting sinus) trace is orthogonally connected", () => {
+    for (let t = 0; t < 5000; t += 250) {
+      assertNoCornerOnlyGaps(dmdFrame("2-1b", "idle", t) as Frame);
+    }
+  });
+
+  it("active (always-AFib) trace is orthogonally connected across a full sweep", () => {
+    for (let t = 0; t < 5120; t += 80) {
+      assertNoCornerOnlyGaps(dmdFrame("2-1b", "active", t, { primary: 3, secondary: 0 }) as Frame);
+    }
+  });
+});
+
 // Fix round 3 (pen-line wave, 2026-07-28): the fix round 2 continuity guard
 // above (assertNoIsolatedDots) already passed BEFORE this wave, because
 // every AFib jitter dot sat Chebyshev-adjacent to the always-lit baseline

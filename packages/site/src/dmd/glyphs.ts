@@ -206,11 +206,25 @@ activeGlyphs["hk-47"] = (t, counts) => {
 // state's trace — baseline AND complexes alike — renders at the SAME bulk
 // intensity (the state's own v; only the R-tip gets the tipV accent), and
 // every segment is either drawn as a run of Chebyshev-adjacent pixels or
-// explicitly bridged with plotLine (see tracePointPlotter, drawAfibWavelets).
-// A real ECG strip never shows the pen lifting, including in the
-// fibrillatory baseline between AFib beats — see each caller (activeGlyphs,
-// domainGlyphs, standbyGlyphs) for why their baseline hline uses the bulk v
-// rather than a dimmer fixed value.
+// explicitly bridged with columnFillLine (see tracePointPlotter,
+// drawAfibWavelets). A real ECG strip never shows the pen lifting, including
+// in the fibrillatory baseline between AFib beats — see each caller
+// (activeGlyphs, domainGlyphs, standbyGlyphs) for why their baseline hline
+// uses the bulk v rather than a dimmer fixed value.
+//
+// Column-fill bridging (column-fill wave, 2026-07-28): plotLine's Bresenham
+// bridge plots one cell per step, so consecutive cells on a steep run are
+// only diagonally (Chebyshev) adjacent — at the DMD's round-dot pitch that
+// reads as a chain of corner-touching dots with a visible gap at each seam,
+// not a solid stroke (the user's side-by-side screenshot against the live
+// board caught this on the R up/downstrokes, the S recovery, and the P/T
+// shoulders). columnFillLine instead fills the FULL vertical span the ideal
+// line crosses in every column it visits — like a real scope rasterizer —
+// so a steep stroke renders as a run of solid vertical dot-bars, each pair
+// of adjacent columns sharing a full pixel edge (von Neumann adjacency), not
+// just a touching corner. Shallow segments (the P/T flanks, the AFib
+// wavelets) are visually unaffected — their per-column span is 1-2 rows
+// either way, the same as a Bresenham step would draw.
 
 // One full PQRST complex, 22px wide (dx 0-21) starting at xOrigin (wrapped
 // into the board so a complex scrolling near the edge continues on the
@@ -240,11 +254,14 @@ activeGlyphs["hk-47"] = (t, counts) => {
 // contracts exactly as they were: only the dy magnitudes changed.
 // Shared point-plotter for both PQRST families (drawPqrst, drawAfibComplex):
 // draws each sample point via px(), and — when `bridge` is set — connects it
-// to the PREVIOUS point with plotLine at `bridgeV` first, so a steep run
-// (e.g. the QRS's Q-R-S strokes, which cross 5-8 rows in a single x-step)
-// renders as a continuous stroke instead of an isolated per-column dot
-// (fix round 2: the trace previously plotted one px per column, leaving the
-// QRS limbs as scattered dots exactly like the heart ring's round-1 bug).
+// to the PREVIOUS point with columnFillLine at `bridgeV` first, so a steep
+// run (e.g. the QRS's Q-R-S strokes, which cross 5-8 rows in a single
+// x-step) renders as a run of solid vertical dot-bars instead of an isolated
+// per-column dot (fix round 2: the trace previously plotted one px per
+// column, leaving the QRS limbs as scattered dots exactly like the heart
+// ring's round-1 bug) or a diagonally-corner-touching Bresenham stair-step
+// (column-fill wave: still readable as gapped at the DMD's dot pitch — see
+// columnFillLine's own comment).
 // Callers still write the point's own intensity via px() AFTER the bridge,
 // so an R-tip's tipV always wins over the bridge's bulk v (px is max-blend:
 // see frame.ts) — the tip stays exactly the apex pixel(s), never diluted to
@@ -291,11 +308,11 @@ function tracePointPlotter(
     const wrappedX = wrapX(rawX);
     let bridged = false;
     if (bridge && prevRawX !== null && Math.floor(prevRawX / DMD_W) === Math.floor(rawX / DMD_W)) {
-      plotLine(f, wrapX(prevRawX), prevY, wrappedX, y, bridgeV);
+      columnFillLine(f, wrapX(prevRawX), prevY, wrappedX, y, bridgeV);
       bridged = true;
     }
     if (bridge && !bridged && anchorIfUnbridged) {
-      plotLine(f, wrappedX, y, wrappedX, baselineY, bridgeV);
+      columnFillLine(f, wrappedX, y, wrappedX, baselineY, bridgeV);
     }
     px(f, wrappedX, y, intensity);
     prevRawX = rawX;
@@ -395,7 +412,7 @@ function drawPqrst(
 // 55%) those specks read as disconnected flecks rather than the wavering,
 // never-lifts-the-pen baseline a real AFib strip shows. This now samples a
 // jitter y every 2-3 columns (a real f-wave doesn't resolve at every pixel
-// either) and bridges consecutive samples with plotLine via the shared
+// either) and bridges consecutive samples with columnFillLine via the shared
 // tracePointPlotter, so the baseline between spikes is one continuous chain.
 // Renders at `v` — the caller's bulk intensity, not a fixed dim value — so
 // it reads with the same weight as the rest of the trace (see the module's
@@ -860,15 +877,20 @@ export function blastOffFrame(elapsedMs: number): Frame {
 }
 
 // Bresenham line: plots every integer cell from (x0,y0) to (x1,y1) so each
-// step is Chebyshev-adjacent to the last — the shared continuity primitive.
-// Two independent users bridge sample dots into a connected chain with it:
-// drawHeartRing (fix round 1: at r≈8-12 the cusp-heavy heart parametrization
-// spaces consecutive rounded samples more than 1px apart on the flanks,
-// fragmenting the outline into scatter) and tracePointPlotter, used by
-// drawPqrst/drawAfibComplex (fix round 2: the ECG's QRS strokes cross 5-8
-// rows in a single x-step, leaving the same kind of isolated dots). Hoisted
-// above its first use here (tracePointPlotter, earlier in this file) by
-// JS's `function`-declaration semantics.
+// step is Chebyshev-adjacent to the last — a general-purpose continuity
+// primitive for outline/silhouette strokes, where a diagonal chain of
+// corner-touching dots is the correct look (matches how the rest of an
+// outline's curve samples land). Two independent users remain: drawHeartRing
+// (fix round 1: at r≈8-12 the cusp-heavy heart parametrization spaces
+// consecutive rounded samples more than 1px apart on the flanks, fragmenting
+// the outline into scatter) and drawFoldingFlaps (the tt-8l shipping box's
+// hinged flap strokes — unrelated to the ECG family this file also draws).
+// The ECG trace itself moved OFF this primitive in the column-fill wave
+// (2026-07-28) — see columnFillLine below and tracePointPlotter's own
+// comment for why a diagonal-only bridge reads as gapped at the DMD's
+// round-dot pitch on steep strokes, which an outline's all-diagonal curve
+// doesn't suffer from since it's diagonal throughout, not intermixed with
+// long flat runs the way a waveform's baseline/complex boundary is.
 function plotLine(f: Frame, x0: number, y0: number, x1: number, y1: number, v: number): void {
   let x = x0;
   let y = y0;
@@ -890,6 +912,48 @@ function plotLine(f: Frame, x0: number, y0: number, x1: number, y1: number, v: n
       y += sy;
     }
   }
+}
+
+// Column-fill line: the ECG trace's bridge primitive (column-fill wave,
+// 2026-07-28), replacing plotLine for tracePointPlotter's use (see that
+// function and the module-level "Column-fill bridging" comment for the
+// motivating gap-at-the-seam problem). For each integer column x in
+// [x0, x1], fills the FULL vertical span the ideal line crosses in that
+// column — like a real oscilloscope rasterizer sweeping columns, not a
+// per-cell stair-step. Consecutive columns share their boundary row exactly
+// (computed once per boundary, reused as both the outgoing column's exit and
+// the incoming column's entry via `boundaryY`), so the fill is orthogonally
+// (von Neumann) continuous end to end: every column's span touches its
+// neighbor's span at a shared row, not just a shared corner.
+//
+// Requires x1 >= x0 — the ECG bridge only ever advances left-to-right within
+// a wrap period (tracePointPlotter's monotonic-x seam guard already enforces
+// this before calling in). A vertical segment (x0 === x1, e.g. the
+// anchorIfUnbridged connector down to the baseline) is the degenerate case:
+// fill the plain min..max span in that one column, same as vline would.
+//
+// Apex safety: for a single-column-apart bridge (the common case for the
+// R-tip's 1px-wide upstroke/downstroke), the whole span lands in column x0
+// via this loop, and column x1 gets only the single endpoint pixel from the
+// trailing px() call below — the caller's own direct px() write for that
+// point (at tipV) then wins the max-blend there. So a steep bridge INTO the
+// tip widens the column below the apex into a solid stroke, but never widens
+// the apex's own column into more than the single point the caller drew —
+// the needle stays a needle; only the stem gets a body.
+function columnFillLine(f: Frame, x0: number, y0: number, x1: number, y1: number, v: number): void {
+  if (x0 === x1) {
+    vline(f, x0, Math.min(y0, y1), Math.max(y0, y1), v);
+    return;
+  }
+  const span = x1 - x0;
+  const rise = y1 - y0;
+  let boundaryY = y0;
+  for (let x = x0; x < x1; x++) {
+    const nextY = Math.round(y0 + ((x + 1 - x0) / span) * rise);
+    vline(f, x, Math.min(boundaryY, nextY), Math.max(boundaryY, nextY), v);
+    boundaryY = nextY;
+  }
+  px(f, x1, y1, v);
 }
 
 // 2-1b — celebrate override: a heart outline instead of the shared diamond
