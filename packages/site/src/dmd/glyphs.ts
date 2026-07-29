@@ -371,69 +371,42 @@ function drawPqrst(
   put(0, 0, v);
   put(1, -3, v, true);
   put(2, -5, v, true);
-  put(3, -6, v, true); // crown, dx 3-4
+  put(3, -6, v, true); // P crown, dx 3-4
   put(4, -6, v, true);
   put(5, -5, v, true);
   put(6, -3, v, true);
   put(7, 0, v, true);
-  // dx 8: flat PR segment (baseline hline covers it) — intentionally NOT
-  // bridged from the P wave into Q, so the isoelectric segment stays flat.
-  put(9, 3, v); // Q dip
-  // Q's own forward edge (into the R upstroke, next) is a normal bridge, but
-  // that bridge is skipped at the rare wrap-seam straddle (tracePointPlotter's
-  // monotonic-x guard) — and unlike the pre-amplitude-wave Q (dy=1, always
-  // Chebyshev-1 from the baseline hline for free), Q now sits 2 rows below
-  // baseline (amplitude wave, 2026-07-28), too far to fall back on hline
-  // adjacency alone. A direct one-row connector closes that gap
-  // unconditionally (harmless overlap with the normal bridge otherwise —
-  // px() is max-blend), keeping Q chain-connected in every case, seam or not.
-  vline(f, wrapX(xOrigin + 9), baselineY + 1, baselineY + 3, v);
-  // R spike: narrow and TOWERING — the dominant vertical feature by a wide
-  // margin over both P (5 rows) and T (7 rows). Upstroke/downstroke at bulk
-  // v, bridged; the apex (dx 9-10, 2px wide) is the tip accent, 13px above
-  // baseline (amplitude wave, 2026-07-28: was 10px) — reaches y≈1 off a
-  // y=14 domain baseline and y≈3 off a y=16 standby baseline, near-touching
-  // the top of the scene band (rows 0-23) at domain — bridged in but
-  // written at tipV so it wins the max-blend over the bridge's own bulk-v
-  // pass through that same pixel.
-  // The QRS is a SPIKE, not a solid bar: with a single-column rise both
-  // flanking columns fill nearly the whole height and the complex reads as
-  // one thick vertical line (the shape review's "thin solid vertical
-  // line"). Stepping the climb and the fall over an extra column each
-  // gives the silhouette converging slopes, so the eye reads a needle with
-  // a distinct Q notch before it and an S trough after.
-  put(10, -5, v, true); // upstroke, lower shoulder
-  put(11, -10, v, true); // upstroke, upper shoulder
-  put(12, -14, tipV, true); // R apex — a single-column point
-  put(13, -10, v, true); // downstroke, upper shoulder
-  put(14, -5, v, true); // downstroke, lower shoulder
-  // S: sharp undershoot below baseline — chain dead end (ST gap unbridged
-  // forward), 6px from baseline (amplitude wave: was 5) so it needs the
-  // anchor. This bridge's SOURCE is the tip's own column (dx=10, already
-  // tipV at the apex row) — bulk-v filling through that row again is a
-  // max-blend no-op, not a new widening (fix round 1's reserveDestinationRow
-  // fix only applies when the DESTINATION is the accent, which S isn't).
-  put(15, 8, v, true, true); // S trough
-  put(16, 0, v, true); // return to baseline — makes the S read as a notch
-  // dx 17: flat ST segment (baseline hline covers it) — intentionally NOT
-  // bridged from S into T, matching the PR segment's flat treatment.
-  // T wave: the WIDEST wave in the complex — 8 columns (dx 14-21), a smooth
-  // rounded arc rising 7 rows (amplitude wave: was 3) with a 2-column flat
-  // top (dx 17-18) for a genuinely rounded (not peaked) hump, matching the
-  // textbook reference. Like the P wave, both endpoints sit at dy=0 so no
-  // anchor is needed.
-  // Same elliptical treatment as P (steep off the baseline, flattening into
-  // a 2-column crown) — a linear ramp here drew the "T pyramid".
-  put(18, 0, v);
-  put(19, -3, v, true);
-  put(20, -6, v, true);
-  put(21, -8, v, true);
-  put(22, -9, v, true); // crown, dx 22-23
-  put(23, -9, v, true);
-  put(24, -8, v, true);
-  put(25, -6, v, true);
-  put(26, -3, v, true);
-  put(27, 0, v, true);
+  // PR segment: drawn as PART OF THE TRACE now, not left to a background
+  // rule. The board no longer paints a baseline through the complex (see
+  // drawBaselineGaps) — a full-width line ran straight through the QRS and
+  // hid the very descent it was supposed to frame.
+  put(8, 0, v, true);
+  put(9, 3, v, true); // Q dip
+  // QRS over 12 columns instead of 8: the climb and fall are DIAGONAL runs
+  // (5 steps each) rather than a near-vertical jump, so the spike separates
+  // itself from P and T instead of reading as a bar dropped between them.
+  put(10, -1, v, true);
+  put(11, -5, v, true);
+  put(12, -9, v, true);
+  put(13, -12, v, true);
+  put(14, -14, tipV, true); // R apex — a single-column point
+  put(15, -12, v, true);
+  put(16, -9, v, true);
+  put(17, -5, v, true);
+  put(18, -1, v, true);
+  put(19, 8, v, true); // S trough
+  put(20, 0, v, true); // return to baseline
+  put(21, 0, v, true); // ST segment — again part of the trace
+  put(22, 0, v, true);
+  put(23, -3, v, true);
+  put(24, -6, v, true);
+  put(25, -8, v, true);
+  put(26, -9, v, true); // T crown, dx 26-27
+  put(27, -9, v, true);
+  put(28, -8, v, true);
+  put(29, -6, v, true);
+  put(30, -3, v, true);
+  put(31, 0, v, true);
 }
 
 // AFib fibrillatory baseline: a CONNECTED undulating polyline, not isolated
@@ -459,6 +432,28 @@ function drawPqrst(
 // independent streams: this is a texture generator, not a physically-modeled
 // signal, so a little correlation between "how far" and "which way" is an
 // acceptable simplicity trade, not a determinism or discriminator risk.
+// The isoelectric baseline is part of the TRACE, not a rule behind it. A real
+// rhythm strip has no graph line under the pen: the flat stretches between
+// complexes are the pen resting at zero. Painting a full-width hline through
+// the board instead ran a bright horizontal bar straight across every QRS,
+// hiding the descent into Q and the return out of S — the trace and its own
+// "graph line" fought each other. Each caller now reports the columns its
+// complexes occupy and the baseline fills only what's left, so the whole
+// frame reads as one continuous pen stroke.
+export interface Span {
+  start: number;
+  len: number;
+}
+function coveredBy(x: number, spans: readonly Span[]): boolean {
+  for (const s of spans) {
+    for (let i = 0; i < s.len; i++) if (wrapX(s.start + i) === x) return true;
+  }
+  return false;
+}
+function drawBaselineGaps(f: Frame, baselineY: number, v: number, spans: readonly Span[]): void {
+  for (let x = 0; x < DMD_W; x++) if (!coveredBy(x, spans)) px(f, x, baselineY, v);
+}
+
 function drawAfibWavelets(f: Frame, baselineY: number, tMs: number, v: number): void {
   const bucket = Math.floor(tMs / 160);
   const put = tracePointPlotter(f, 0, baselineY, v);
@@ -548,18 +543,23 @@ function drawAfib(
   v: number,
   tipV: number,
 ): void {
-  drawAfibWavelets(f, baselineY, tMs, v);
   const sweepMs = 5120;
   const sweepIdx = Math.floor(tMs / sweepMs);
   const rand = mulberry32(sweepIdx * 733 + beats * 31);
   const base = DMD_W / beats;
   const scroll = Math.floor(tMs / 80) % DMD_W;
+  const placed: Array<{ x: number; amp: number }> = [];
   for (let i = 0; i < beats; i++) {
     const jitter = Math.round((rand() - 0.5) * base * 0.8);
     const amp = Math.round((rand() - 0.5) * 4); // ±2px
-    const x = Math.round(base * (i + 0.5)) + jitter + scroll;
-    drawAfibComplex(f, x, baselineY, v, tipV, amp);
+    placed.push({ x: Math.round(base * (i + 0.5)) + jitter + scroll, amp });
   }
+  // AFib's fibrillatory wander IS its baseline, and unlike the sinus rule it
+  // runs CONTINUOUSLY under the complexes — that's exactly what a real AFib
+  // strip shows, and a ±1px wander never hides a 14-row spike the way a
+  // straight full-width line did.
+  drawAfibWavelets(f, baselineY, tMs, v);
+  for (const p of placed) drawAfibComplex(f, p.x, baselineY, v, tipV, p.amp);
 }
 
 // 2-1b — active (diagnosing): ALWAYS AFib. Diagnosing only happens because
@@ -573,7 +573,6 @@ function drawAfib(
 activeGlyphs["2-1b"] = (t, counts) => {
   const f = blank();
   const baselineY = 14;
-  hline(f, 0, DMD_W - 1, baselineY, 2);
   const beats = clamp(counts.primary, 1, 6);
   drawAfib(f, baselineY, t, beats, 2, 3);
   return f;
@@ -735,22 +734,35 @@ activeGlyphs.copilot = (t) => {
 // MORE dense/chaotic relative to sinus's sparser 1-2 beats — reinforcing
 // (not undermining) the intended contrast between a chaotic rhythm and an
 // obviously well-formed one.
-const SINUS_RR_GAP_LO = 30; // px, at primary>=6 (saturated)
-const SINUS_RR_GAP_HI = 34; // px, at primary<=2
-const SINUS_R_OFFSET = 12; // dx of the R-tip's column within drawPqrst
+// CI load reads as HEART RATE, not beat count. The drama/width waves grew the
+// complex to 32 columns; two of those cover the entire 64-column board, leaving
+// no isoelectric run between them (and stranding lone baseline dots in the
+// one-column seam). A rhythm strip needs flat line between beats to read as a
+// rhythm at all, so the board now shows ONE well-formed complex and scrolls it
+// FASTER as more PRs sit in CI — tachycardia as load signal, which is both
+// honest and what a real monitor does. Saturates at primary>=6, the same
+// ceiling the old beat-count and R-R-gap mappings used, so the
+// dom(6)===dom(10) invariant survives in the same form.
+const SINUS_R_OFFSET = 14; // dx of the R-tip's column within drawPqrst
+const SINUS_COMPLEX_W = 32; // dx 0-31 inclusive
+const SINUS_MS_PER_PX_RESTING = 80; // primary<=1
+const SINUS_MS_PER_PX_LOADED = 45; // primary>=6 (saturated)
+
+export function sinusMsPerPx(primary: number): number {
+  const load = clamp(primary, 1, 6);
+  return (
+    SINUS_MS_PER_PX_RESTING - ((load - 1) / 5) * (SINUS_MS_PER_PX_RESTING - SINUS_MS_PER_PX_LOADED)
+  );
+}
 
 function drawSinusBeats(f: Frame, baselineY: number, t: number, primary: number): void {
-  const scroll = Math.floor(t / 80) % DMD_W;
+  const scroll = Math.floor(t / sinusMsPerPx(primary)) % DMD_W;
   const opts = { v: 2, tipV: 3 };
-  if (primary <= 1) {
-    drawPqrst(f, Math.round(DMD_W / 2 - SINUS_R_OFFSET) + scroll, baselineY, opts);
-    return;
-  }
-  const loadClamped = clamp(primary, 2, 6);
-  const gap = SINUS_RR_GAP_HI - ((loadClamped - 2) / 4) * (SINUS_RR_GAP_HI - SINUS_RR_GAP_LO);
-  const half = gap / 2;
-  drawPqrst(f, Math.round(DMD_W / 2 - half - SINUS_R_OFFSET) + scroll, baselineY, opts);
-  drawPqrst(f, Math.round(DMD_W / 2 + half - SINUS_R_OFFSET) + scroll, baselineY, opts);
+  const origin = Math.round(DMD_W / 2 - SINUS_R_OFFSET) + scroll;
+  // Baseline first, only outside the complex (see drawBaselineGaps), then the
+  // complex — so no bright rule crosses the QRS.
+  drawBaselineGaps(f, baselineY, opts.v, [{ start: origin, len: SINUS_COMPLEX_W }]);
+  drawPqrst(f, origin, baselineY, opts);
 }
 
 // 2-1b — domain: load-scaled ECG, sinus or AFib depending on whether CI is
@@ -770,7 +782,6 @@ function drawSinusBeats(f: Frame, baselineY: number, t: number, primary: number)
 domainGlyphs["2-1b"] = (t, counts) => {
   const f = blank();
   const baselineY = 14;
-  hline(f, 0, DMD_W - 1, baselineY, 2);
   const amiss = counts.secondary > 0;
   if (amiss) {
     const beats = clamp(counts.primary, 1, 6);
@@ -1143,9 +1154,9 @@ export const standbyGlyphs: Record<DroidId, (tMs: number) => Frame> = {
   "2-1b": (t) => {
     const f = blank();
     const baselineY = 14;
-    hline(f, 0, DMD_W - 1, baselineY, 2);
     const period = 5000;
     const xOrigin = Math.floor(((t % period) / period) * DMD_W);
+    drawBaselineGaps(f, baselineY, 2, [{ start: xOrigin, len: SINUS_COMPLEX_W }]);
     drawPqrst(f, xOrigin, baselineY, { v: 2, tipV: 2 });
     return f;
   },

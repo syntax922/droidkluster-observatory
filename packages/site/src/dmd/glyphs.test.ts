@@ -7,6 +7,7 @@ import {
   dmdFrame,
   drawHeartRing,
   type GlyphCounts,
+  sinusMsPerPx,
   standbyGlyphs,
 } from "./glyphs.js";
 
@@ -335,16 +336,15 @@ describe("2-1b PQRST", () => {
     ).toBe(false);
   });
 
-  it("AFib R-R intervals are irregularly irregular; sinus intervals are equal", () => {
-    const sinusSpikes = rColumns(dom(3, 0) as Frame);
+  it("AFib R-R intervals are irregularly irregular; sinus shows one metronomic beat", () => {
+    // Sinus renders a single complex now (load is rate, not count — see
+    // sinusMsPerPx), so its regularity shows as one beat scrolling at a
+    // constant speed rather than as evenly spaced spikes within a frame.
+    expect(rColumns(dom(3, 0) as Frame).length).toBe(1);
     const afibSpikes = rColumns(dom(3, 1) as Frame);
-    expect(sinusSpikes.length).toBeGreaterThanOrEqual(2);
     expect(afibSpikes.length).toBeGreaterThanOrEqual(2);
-    const gaps = (xs: number[]) => xs.slice(1).map((x, i) => x - (xs[i] as number));
-    const sg = gaps(sinusSpikes);
-    expect(new Set(sg).size).toBeLessThanOrEqual(2); // even spacing (±1 rounding)
-    const ag = gaps(afibSpikes);
-    expect(new Set(ag).size).toBe(ag.length); // pairwise distinct
+    const gaps = afibSpikes.slice(1).map((x, i) => x - (afibSpikes[i] as number));
+    expect(new Set(gaps).size).toBe(gaps.length); // pairwise distinct
   });
 
   it("active is AFib (diagnosing = something failed) and deterministic", () => {
@@ -382,38 +382,32 @@ describe("2-1b PQRST", () => {
   // Beat-count rescale (morphology wave, 2026-07-28): pins the new mapping
   // directly, separate from the ceiling-clamp invariant above.
   describe("sinus beat-count rescale", () => {
-    it("renders at most 2 full complexes at any primary, unlike AFib's up-to-6", () => {
+    it("renders exactly 1 full complex at any primary, unlike AFib's up-to-6", () => {
       for (const primary of [1, 2, 3, 4, 6, 10]) {
         const sinusRs = rColumns(dom(primary, 0) as Frame);
-        expect(sinusRs.length).toBeLessThanOrEqual(2);
+        expect(sinusRs.length).toBe(1);
       }
       // AFib at the same primary values can exceed 2 (it's still clamp(1,6)).
       const afibRs = rColumns(dom(6, 1) as Frame);
       expect(afibRs.length).toBeGreaterThan(2);
     });
 
-    it("primary<=1 renders a single complex; primary>=2 renders two", () => {
-      expect(rColumns(dom(1, 0) as Frame).length).toBe(1);
-      expect(rColumns(dom(2, 0) as Frame).length).toBe(2);
+    it("load reads as RATE: the complex scrolls faster as primary rises, saturating at 6", () => {
+      // sinusMsPerPx is ms per column of scroll — smaller is faster. This is
+      // the honest load signal now that one big complex owns the board.
+      expect(sinusMsPerPx(1)).toBeGreaterThan(sinusMsPerPx(3));
+      expect(sinusMsPerPx(3)).toBeGreaterThan(sinusMsPerPx(6));
+      // Saturation at 6 keeps the dom(6)===dom(10) ceiling invariant intact.
+      expect(sinusMsPerPx(6)).toBe(sinusMsPerPx(10));
+      expect(sinusMsPerPx(1)).toBe(sinusMsPerPx(0));
     });
 
-    it("R-R spacing between the two beats shrinks as primary rises from 2 to 6 (honest load signal)", () => {
-      const gapAt = (primary: number) => {
-        const cols = rColumns(dom(primary, 0) as Frame);
-        expect(cols.length).toBe(2);
-        return (cols[1] as number) - (cols[0] as number);
-      };
-      const gapLow = gapAt(2);
-      const gapMid = gapAt(4);
-      const gapHigh = gapAt(6);
-      expect(gapLow).toBeGreaterThan(gapMid);
-      expect(gapMid).toBeGreaterThan(gapHigh);
-      // Never compresses enough for the two 22px-footprint complexes to
-      // visually merge (26px min gap, per drawSinusBeats' own contract).
-      // rCol is the R-tip apex (fixed dx=9 offset from each beat's xOrigin —
-      // see rColumns' fix round 1 comment), so this gap should land exactly
-      // on drawSinusBeats' own gap value; a small margin covers rounding.
-      expect(gapHigh).toBeGreaterThanOrEqual(24);
+    it("a busier CI advances the trace further in the same elapsed time", () => {
+      const apexAt = (primary: number, t: number) =>
+        rColumns(dmdFrame("2-1b", "domain", t, { primary, secondary: 0 }) as Frame)[0] as number;
+      const restingTravel = apexAt(1, 900) - apexAt(1, 0);
+      const loadedTravel = apexAt(6, 900) - apexAt(6, 0);
+      expect(loadedTravel).toBeGreaterThan(restingTravel);
     });
 
     it("spacing saturates at primary=6 — primary=6 and primary=10 have identical R-R gap", () => {
@@ -560,9 +554,14 @@ describe("2-1b ECG trace continuity (fix round 2)", () => {
       for (let x = 0; x < DMD_W; x++) if ((f[y * DMD_W + x] ?? 0) > 0) points.push([x, y]);
     expect(points.length).toBeGreaterThan(0);
     for (const [x, y] of points) {
-      const hasNeighbor = points.some(
-        ([x2, y2]) => (x2 !== x || y2 !== y) && Math.max(Math.abs(x2 - x), Math.abs(y2 - y)) <= 1,
-      );
+      // Horizontal distance wraps — the trace scrolls, so the board's edges
+      // are a sweep seam, not a break in the signal (see the orthogonal
+      // continuity block for the full rationale).
+      const hasNeighbor = points.some(([x2, y2]) => {
+        if (x2 === x && y2 === y) return false;
+        const dx = Math.min(Math.abs(x2 - x), DMD_W - Math.abs(x2 - x));
+        return Math.max(dx, Math.abs(y2 - y)) <= 1;
+      });
       expect(hasNeighbor).toBe(true);
     }
   }
@@ -707,9 +706,14 @@ describe("2-1b ECG trace orthogonal continuity (column-fill wave)", () => {
       const [xs, ys] = key.split(",");
       const x = Number(xs);
       const y = Number(ys);
+      // Horizontal neighbours wrap: the trace SCROLLS, so x=63 and x=0 are
+      // the same continuous signal crossing the sweep seam. This only became
+      // observable when the baseline stopped being a full-width rule (see
+      // drawBaselineGaps): the rule used to light every column of the
+      // baseline row, so an edge pixel always had an in-board neighbour.
       const hasOrthogonalNeighbor =
-        lit.has(`${x - 1},${y}`) ||
-        lit.has(`${x + 1},${y}`) ||
+        lit.has(`${(x + DMD_W - 1) % DMD_W},${y}`) ||
+        lit.has(`${(x + 1) % DMD_W},${y}`) ||
         lit.has(`${x},${y - 1}`) ||
         lit.has(`${x},${y + 1}`);
       expect(hasOrthogonalNeighbor).toBe(true);
