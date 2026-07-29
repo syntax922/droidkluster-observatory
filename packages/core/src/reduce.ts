@@ -62,6 +62,21 @@ interface Classified {
   reopen?: boolean;
 }
 
+// Fleet-internal orchestration events are published under the BRAND namespace
+// (droidkluster.event.*), while app-domain events use the source-repo token
+// (<repo>.event.*). Which one a given family uses is deployment config, not
+// source: the fleet's own source defaults say `<repo>` for merge_decision and
+// poster_review, but the deployed configmaps override both to `droidkluster.`
+// — and a subject that doesn't match is silently dropped, which is exactly how
+// 100% of merge decisions went missing. Accept either namespace so neither a
+// config flip nor a source default can quietly blind the board again.
+function isFamily(subject: string, repo: string, family: string): boolean {
+  return (
+    subject.startsWith(`droidkluster.event.${family}`) ||
+    subject.startsWith(`${repo}.event.${family}`)
+  );
+}
+
 function classify(
   subject: string,
   payload: unknown,
@@ -73,7 +88,7 @@ function classify(
   const tokens = subject.split(".");
 
   // merge-decider family: <repo>.event.merge_decision.reached.<pr>
-  if (subject.startsWith(`${repo}.event.merge_decision.reached.`)) {
+  if (isFamily(subject, repo, "merge_decision.reached.")) {
     // The subject tail is the COMMAND id (a uuid), never the PR — the merge
     // decider keys its events by command. Reading the PR out of the payload is
     // the only route; `pr` is what the decider actually sends (pr_number kept
@@ -115,7 +130,7 @@ function classify(
   // and not deduped. Both fields are on the payload, so this claims a rework
   // only when the router will actually dispatch one — a repeat verdict on an
   // unchanged head (deduped) routes nothing, and neither do we.
-  if (subject.startsWith(`${repo}.event.poster_review.completed.`)) {
+  if (isFamily(subject, repo, "poster_review.completed.")) {
     const pr = num(obj(p.pr)?.number) ?? num(p.pr_number);
     if (!pr) return null;
     if ((str(p.review_state) ?? "").toUpperCase() !== "REQUEST_CHANGES") return null;
@@ -134,7 +149,7 @@ function classify(
   // has a package to ship. This is what puts the station into `active` (the
   // rocket-loading dock); nothing else ever did, which is why that scene was
   // unreachable in production despite shipping.
-  if (subject.startsWith(`${repo}.event.merge_queue.enqueue.`)) {
+  if (isFamily(subject, repo, "merge_queue.enqueue.")) {
     const pr = num(p.pr) ?? num(Number(tokens[tokens.length - 1]));
     if (!pr) return null;
     return {
@@ -150,7 +165,7 @@ function classify(
   // The queue's verdict on that package: merged, refused, or a dry run. Either
   // way TT-8L's work on it is done, so the station stands down (a real merge
   // also lands a GitHub pr_merged, which is what fires the blast-off).
-  if (subject.startsWith(`${repo}.event.merge.executed.`)) {
+  if (isFamily(subject, repo, "merge.executed.")) {
     const pr = num(p.pr) ?? num(Number(tokens[tokens.length - 1]));
     if (!pr) return null;
     const rawOutcome = (str(p.outcome) ?? "executed").toLowerCase();
@@ -169,7 +184,7 @@ function classify(
 
   // coder-completed family: droidkluster.event.coder.completed.<id>
   // (brand — unchanged; droidkluster is the public brand, not the private repo token)
-  if (subject.startsWith("droidkluster.event.coder.completed.")) {
+  if (isFamily(subject, repo, "coder.completed.")) {
     const kindField = str(p.kind);
     const pr = num(p.pr_number);
     const issue = num(p.issue_number);
