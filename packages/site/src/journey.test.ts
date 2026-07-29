@@ -14,6 +14,7 @@ describe("stageOf", () => {
     review_posted: "review",
     check_run: "ci",
     coder_completed: "rework",
+    rework_started: "rework",
     copilot_session_started: "rework",
     copilot_session_ended: "rework",
     merge_decision: "decision",

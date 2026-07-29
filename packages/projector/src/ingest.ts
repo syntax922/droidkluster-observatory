@@ -18,6 +18,8 @@ const DEFAULT_IGNORE_PRS: ReadonlySet<number> = new Set([99999]);
 // ignorePrs, a wrong fallback here would silently no-op every real
 // recording rather than fail loudly), ignorePrs/redactTerms stay optional.
 export interface IngestOpts {
+  /** Coder login whose PR assignment starts a rework (see ReduceOpts). */
+  coderLogin?: string;
   repo: string;
   ignorePrs?: ReadonlySet<number>;
   redactTerms?: readonly string[];
@@ -43,6 +45,7 @@ export function ingest(inputPath: string, outDir: string, opts: IngestOpts): str
         },
         {
           repo: opts.repo,
+          ...(opts.coderLogin ? { coderLogin: opts.coderLogin } : {}),
           ignorePrs,
           ...(opts.redactTerms ? { redactTerms: opts.redactTerms } : {}),
         },

@@ -573,3 +573,67 @@ describe("R5 events", () => {
     expect(emitted[0]?.summary).toContain("coder completed");
   });
 });
+
+describe("rework visibility (R5)", () => {
+  const prOpenedFirst = {
+    kind: "event" as const,
+    id: "e-open",
+    subject: "gh.event.exampleproj.pr.opened.1770",
+    ts: "2026-07-29T06:00:00Z",
+    payload: { pull_request: { number: 1770 } },
+  };
+  const assigned = (login: string) => ({
+    kind: "event" as const,
+    id: `e-assign-${login}`,
+    subject: "gh.event.exampleproj.pr.assigned.1770",
+    ts: "2026-07-29T06:10:00Z",
+    payload: { assignee: { login }, pull_request: { number: 1770 } },
+  });
+
+  it("assignment to the coder login ACTIVATES r5 — the only start-of-rework signal on the bus", () => {
+    // The rework START is published only as a command
+    // (droidkluster.command.coder.<id>); the dispatcher deliberately emits no
+    // dashboard event for it, and this projector reads events. The assignment
+    // webhook is the same trigger the dispatcher gates on, so it is the honest
+    // signal — without it R5 stays idle for the whole rework and only appears
+    // once coder.completed lands, i.e. after the work is over.
+    const s = reduce(emptyFleetState(), prOpenedFirst, OPTS).state;
+    const { state, emitted } = reduce(s, assigned("droidkluster"), OPTS);
+    expect(emitted[0]?.kind).toBe("rework_started");
+    expect(emitted[0]?.summary).toBe("R5 reworking PR #1770");
+    expect(state.droids.r5.task).toBe("reworking PR #1770");
+    expect(state.droids.r5.since).toBe("2026-07-29T06:10:00Z");
+  });
+
+  it("assignment to anyone else is a human action, not R5's — ignored", () => {
+    const s = reduce(emptyFleetState(), prOpenedFirst, OPTS).state;
+    const { state, emitted } = reduce(s, assigned("some-human"), OPTS);
+    expect(emitted).toHaveLength(0);
+    expect(state.droids.r5.task).toBeUndefined();
+  });
+
+  it("the coder login is configurable", () => {
+    const s = reduce(emptyFleetState(), prOpenedFirst, OPTS).state;
+    const { emitted } = reduce(s, assigned("other-bot"), { ...OPTS, coderLogin: "other-bot" });
+    expect(emitted[0]?.kind).toBe("rework_started");
+  });
+
+  it("coder_completed still stands r5 down when the rework finishes", () => {
+    let st = reduce(emptyFleetState(), prOpenedFirst, OPTS).state;
+    st = reduce(st, assigned("droidkluster"), OPTS).state;
+    expect(st.droids.r5.task).toBe("reworking PR #1770");
+    const done = reduce(
+      st,
+      {
+        kind: "event",
+        id: "e-done",
+        subject: "droidkluster.event.coder.completed.cmd-1",
+        ts: "2026-07-29T06:28:00Z",
+        payload: { kind: "rework", pr_number: 1770, status: "reworked", exit_code: 0 },
+      },
+      OPTS,
+    );
+    expect(done.state.droids.r5.task).toBeUndefined();
+    expect(done.state.droids.r5.last_action).toContain("reworked");
+  });
+});

@@ -1,5 +1,6 @@
 import {
   type CurrentSnapshot,
+  DEFAULT_CODER_LOGIN,
   emptyFleetState,
   type PublicEvent,
   type ReplayBundle,
@@ -251,6 +252,8 @@ function syntheticSubject(e: PublicEvent): string {
       return `gh.event.${REPLAY_REPO}.pr.review_requested.${e.pr}`;
     case "review_started":
       return `gh.event.${REPLAY_REPO}.pr.review_started.${e.pr}`;
+    case "rework_started":
+      return `gh.event.${REPLAY_REPO}.pr.assigned.${e.pr}`;
     case "review_posted":
       return `gh.event.${REPLAY_REPO}.pull_request_review.submitted.${e.pr}`;
     case "check_run":
@@ -292,6 +295,14 @@ function syntheticPayload(e: PublicEvent): Record<string, unknown> {
       return { action: "review_requested", pull_request: { number: pr } };
     case "review_started":
       return { action: "review_started", pull_request: { number: pr } };
+    case "rework_started":
+      // Round-trips through the same gate the reducer applies: only an
+      // assignment to the coder login is a rework start.
+      return {
+        action: "assigned",
+        assignee: { login: DEFAULT_CODER_LOGIN },
+        pull_request: { number: pr },
+      };
     case "review_posted":
       return {
         action: "submitted",

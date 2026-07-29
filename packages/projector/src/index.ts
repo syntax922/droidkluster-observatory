@@ -103,6 +103,7 @@ export async function main(): Promise<void> {
           repo: cfg.sourceRepo,
           ignorePrs: cfg.ignorePrs,
           redactTerms: cfg.redactTerms,
+          coderLogin: cfg.coderLogin,
         });
         if (emitted.length > 0) {
           const day = new Date().toISOString().slice(0, 10);
