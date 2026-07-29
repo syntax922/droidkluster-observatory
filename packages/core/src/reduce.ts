@@ -103,6 +103,32 @@ function classify(
     };
   }
 
+  // poster-review family: <repo>.event.poster_review.completed.<id>
+  //
+  // THE start-of-rework signal. Reworks are not dispatched by PR assignment in
+  // the normal flow — the review-feedback-router consumes this event and
+  // publishes a coder COMMAND, which this projector (an event reader) never
+  // sees. Without this branch R5 stays idle for the entire rework and only
+  // appears once coder.completed lands, i.e. after the work is finished.
+  //
+  // The gate mirrors the router's own, exactly: review_state REQUEST_CHANGES
+  // and not deduped. Both fields are on the payload, so this claims a rework
+  // only when the router will actually dispatch one — a repeat verdict on an
+  // unchanged head (deduped) routes nothing, and neither do we.
+  if (subject.startsWith(`${repo}.event.poster_review.completed.`)) {
+    const pr = num(obj(p.pr)?.number) ?? num(p.pr_number);
+    if (!pr) return null;
+    if ((str(p.review_state) ?? "").toUpperCase() !== "REQUEST_CHANGES") return null;
+    if (p.deduped === true) return null;
+    return {
+      kind: "rework_started",
+      droid: "r5",
+      pr,
+      summary: `R5 reworking PR #${pr}`,
+      activate: { droid: "r5", task: `reworking PR #${pr}` },
+    };
+  }
+
   // merge-queue family: <repo>.event.merge_queue.enqueue.<pr>
   // A PR admitted to the merge queue is the moment TT-8L starts working — it
   // has a package to ship. This is what puts the station into `active` (the
