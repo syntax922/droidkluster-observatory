@@ -364,16 +364,19 @@ function drawPqrst(
   // bridge-crossing plant (which pins the Q->R-upstroke bridge's OWN
   // baseline-2 crossing, at relative offset -1 from the apex column — the
   // artifact this note is warning about — to prove the window excludes it).
+  // Elliptical, not linear: a constant-slope ramp draws a TRIANGLE (the
+  // "P pyramid" the shape review called out). A real P leaves the baseline
+  // steeply and flattens into a short crown, so the slope must VARY — 3
+  // rows, then 2, then a 2-column crown, mirrored back down.
   put(0, 0, v);
-  put(1, -2, v, true);
-  put(2, -4, v, true);
-  put(3, -5, v, true); // P peak (single column — a dome, not a mesa)
-  put(4, -4, v, true);
-  put(5, -2, v, true);
-  put(6, 0, v, true);
-  // dx 7: flat PR segment (baseline hline covers it) — intentionally NOT
+  put(1, -3, v, true);
+  put(2, -5, v, true); // crown, dx 2-3
+  put(3, -5, v, true);
+  put(4, -3, v, true);
+  put(5, 0, v, true);
+  // dx 6: flat PR segment (baseline hline covers it) — intentionally NOT
   // bridged from the P wave into Q, so the isoelectric segment stays flat.
-  put(8, 2, v); // Q dip
+  put(7, 2, v); // Q dip
   // Q's own forward edge (into the R upstroke, next) is a normal bridge, but
   // that bridge is skipped at the rare wrap-seam straddle (tracePointPlotter's
   // monotonic-x guard) — and unlike the pre-amplitude-wave Q (dy=1, always
@@ -382,7 +385,7 @@ function drawPqrst(
   // adjacency alone. A direct one-row connector closes that gap
   // unconditionally (harmless overlap with the normal bridge otherwise —
   // px() is max-blend), keeping Q chain-connected in every case, seam or not.
-  px(f, wrapX(xOrigin + 8), baselineY + 1, v);
+  px(f, wrapX(xOrigin + 7), baselineY + 1, v);
   // R spike: narrow and TOWERING — the dominant vertical feature by a wide
   // margin over both P (5 rows) and T (7 rows). Upstroke/downstroke at bulk
   // v, bridged; the apex (dx 9-10, 2px wide) is the tip accent, 13px above
@@ -391,29 +394,39 @@ function drawPqrst(
   // the top of the scene band (rows 0-23) at domain — bridged in but
   // written at tipV so it wins the max-blend over the bridge's own bulk-v
   // pass through that same pixel.
-  put(9, -13, tipV, true); // R tip — a single-column point, not a flat top
+  // The QRS is a SPIKE, not a solid bar: with a single-column rise both
+  // flanking columns fill nearly the whole height and the complex reads as
+  // one thick vertical line (the shape review's "thin solid vertical
+  // line"). Stepping the climb and the fall over an extra column each
+  // gives the silhouette converging slopes, so the eye reads a needle with
+  // a distinct Q notch before it and an S trough after.
+  put(8, -6, v, true); // upstroke shoulder
+  put(9, -13, tipV, true); // R apex — a single-column point
+  put(10, -6, v, true); // downstroke shoulder
   // S: sharp undershoot below baseline — chain dead end (ST gap unbridged
   // forward), 6px from baseline (amplitude wave: was 5) so it needs the
   // anchor. This bridge's SOURCE is the tip's own column (dx=10, already
   // tipV at the apex row) — bulk-v filling through that row again is a
   // max-blend no-op, not a new widening (fix round 1's reserveDestinationRow
   // fix only applies when the DESTINATION is the accent, which S isn't).
-  put(10, 6, v, true, true);
-  // dx 11-12: flat ST segment (baseline hline covers it) — intentionally NOT
+  put(11, 6, v, true, true); // S trough
+  put(12, 0, v, true); // return to baseline — makes the S read as a notch
+  // dx 13: flat ST segment (baseline hline covers it) — intentionally NOT
   // bridged from S into T, matching the PR segment's flat treatment.
   // T wave: the WIDEST wave in the complex — 8 columns (dx 14-21), a smooth
   // rounded arc rising 7 rows (amplitude wave: was 3) with a 2-column flat
   // top (dx 17-18) for a genuinely rounded (not peaked) hump, matching the
   // textbook reference. Like the P wave, both endpoints sit at dy=0 so no
   // anchor is needed.
-  put(13, 0, v);
-  put(14, -2, v, true);
-  put(15, -4, v, true);
+  // Same elliptical treatment as P (steep off the baseline, flattening into
+  // a 2-column crown) — a linear ramp here drew the "T pyramid".
+  put(14, 0, v);
+  put(15, -3, v, true);
   put(16, -6, v, true);
-  put(17, -7, v, true); // T peak (single column — a dome, not a mesa)
-  put(18, -6, v, true);
-  put(19, -4, v, true);
-  put(20, -2, v, true);
+  put(17, -7, v, true); // crown, dx 17-18
+  put(18, -7, v, true);
+  put(19, -6, v, true);
+  put(20, -3, v, true);
   put(21, 0, v, true);
 }
 
@@ -498,14 +511,16 @@ function drawAfibComplex(
   // wave here (that's the point: AFib has none), so the whole complex is
   // one continuous Q-R-S stroke with no flat gaps to skip.
   const put = tracePointPlotter(f, x, baselineY, v);
-  put(-1, 1, v); // Q
-  put(0, -h, tipV, true); // R tip — single-column point (see drawPqrst)
+  put(-2, 1, v); // Q
+  put(-1, -6, v, true); // upstroke shoulder (see drawPqrst's QRS comment)
+  put(0, -h, tipV, true); // R apex — single-column point
+  put(1, -6, v, true); // downstroke shoulder
   // S: real undershoot below baseline — chain dead end (no forward point),
   // 6px out so it needs the anchor. Both this bridge and the downstroke
   // bridge above have the tip's own column as their SOURCE (already tipV at
   // the apex row), never a DESTINATION — fix round 1's reserveDestinationRow
   // only fires when the accent is the destination, so these are unaffected.
-  put(1, 6, v, true, true);
+  put(2, 6, v, true, true); // S trough
 }
 
 // Shared AFib renderer, parameterized by the caller's intensity budget.
