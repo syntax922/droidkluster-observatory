@@ -21,6 +21,8 @@ const HOW_ITS_BUILT_BODY =
 
 const SOURCE_URL = "https://github.com/syntax922/droidkluster-observatory";
 
+const WRITEUP_URL = "https://blog.droidkluster.com/posts/agent-github-identity/";
+
 const LINE_INTERVAL_MS = 900;
 
 type Mode = "boot" | "panel";
@@ -77,6 +79,11 @@ export function initIntro(deps: IntroDeps): void {
       sourceLink.href = SOURCE_URL;
       sourceLink.textContent = "view the source on GitHub →";
       panel.appendChild(sourceLink);
+
+      const writeupLink = document.createElement("a");
+      writeupLink.href = WRITEUP_URL;
+      writeupLink.textContent = "why each droid has its own identity →";
+      panel.appendChild(writeupLink);
     }
 
     const enter = document.createElement("button");
